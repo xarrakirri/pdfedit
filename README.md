@@ -1,107 +1,112 @@
-# pdfedit — редактирование PDF на уровне объектов документа
+# pdfedit — PDF editing at the document-object level
 
-Программа заменяет текст **прямо в потоках содержимого** PDF — переписывает
-операнды операторов показа текста `Tj` и `TJ`, а не рисует заплатки поверх
-страницы и не превращает документ в картинку. Внедрённые шрифты, размеры,
-цвета, интервалы, закладки, формы и метаданные остаются на месте.
+*[Русская версия](README.ru.md)*
 
-Область применения — исправление опечаток в официальных документах,
-работа с архивами, где важна неизменность метаданных, и проверка систем
-обработки PDF.
+pdfedit replaces text **directly inside PDF content streams** — it rewrites the
+operands of the `Tj` and `TJ` text-showing operators. It does not paint patches
+over the page and it does not rasterise the document. Embedded fonts, sizes,
+colours, spacing, bookmarks, form fields and metadata all stay where they were.
 
+Intended uses: correcting typos in official documents, working with archives
+where metadata must remain untouched, and testing PDF-processing pipelines.
 
-> Инструмент написан в связке с LLM и доведён до рабочего состояния
-> итеративно: 223 автотеста, проверка на 60 реальных документах.
-> Всё, что не работает, честно перечислено в разделе
-> [Ограничения](#ограничения) — включая случаи, неразрешимые в принципе.
+> Built in collaboration with an LLM and driven to a working state iteratively:
+> 225 automated tests, validated against 60 real-world documents.
+> Everything that does not work is listed honestly under
+> [Limitations](#limitations) — including cases that are unsolvable in principle.
 
----
-
-## Содержание
-
-- [Что умеет](#что-умеет)
-- [Установка](#установка)
-- [Приложение для macOS](#приложение-для-macos)
-- [Быстрый старт](#быстрый-старт)
-- [Командная строка](#командная-строка)
-- [Графический режим](#графический-режим)
-- [Как это работает](#как-это-работает)
-- [Режимы подгонки ширины](#режимы-подгонки-ширины)
-- [Работа со шрифтами](#работа-со-шрифтами)
-- [Библиотека шрифтов-доноров](#библиотека-шрифтов-доноров)
-- [Метаданные](#метаданные)
-- [Три режима сохранения](#три-режима-сохранения)
-- [Защищённые документы](#защищённые-документы)
-- [Цифровые подписи](#цифровые-подписи)
-- [Проверка структуры](#проверка-структуры)
-- [Отсутствие следов правки](#отсутствие-следов-правки)
-- [Программный интерфейс](#программный-интерфейс)
-- [Тесты](#тесты)
-- [Ограничения](#ограничения)
-- [Устройство исходного кода](#устройство-исходного-кода)
+> **A note on output samples.** The command-line interface currently prints its
+> reports in Russian. Sample output in this document has been translated for
+> readability; the wording you see on screen will differ. Localising the CLI is
+> an open task and a good first contribution.
 
 ---
 
-## Что умеет
+## Contents
 
-| Возможность | Состояние |
+- [What it does](#what-it-does)
+- [Installation](#installation)
+- [macOS application](#macos-application)
+- [Quick start](#quick-start)
+- [Command line](#command-line)
+- [Graphical mode](#graphical-mode)
+- [How it works](#how-it-works)
+- [Width-fitting modes](#width-fitting-modes)
+- [Working with fonts](#working-with-fonts)
+- [Donor font library](#donor-font-library)
+- [Metadata](#metadata)
+- [Three saving modes](#three-saving-modes)
+- [Encrypted documents](#encrypted-documents)
+- [Digital signatures](#digital-signatures)
+- [Structural validation](#structural-validation)
+- [Leaving no editing traces](#leaving-no-editing-traces)
+- [Programmatic interface](#programmatic-interface)
+- [Tests](#tests)
+- [Limitations](#limitations)
+- [Source layout](#source-layout)
+
+---
+
+## What it does
+
+| Capability | Status |
 |---|---|
-| Замена текста в операторах `Tj`/`TJ` | да |
-| Сохранение внедрённых шрифтов и их глифов | да |
-| Добавление недостающих глифов во внедрённый шрифт | да, для TrueType |
-| Внедрение запасного шрифта, если свой не подходит | да |
-| Кириллица и любые другие письменности | да |
-| Текст внутри Form XObject (штампы, бланки) | да |
-| Составные шрифты Type0/CID (Identity-H) | да |
-| Простые шрифты Type1/TrueType, кодировки и `/Differences` | да |
-| Невнедрённые стандартные шрифты | да, с предупреждением |
-| Правка метаданных `/Info` и синхронизация XMP | да |
-| Сохранение `/ID`, версии и структуры оригинала | да |
-| Сохранение дописыванием: исходные байты и номера объектов не меняются | да, `--incremental` |
-| Правка потоков на месте: длина файла и хеши прочих объектов не меняются | да, `--inplace` |
-| Правка защищённого документа с сохранением защиты | да, при дописывании (RC4, AES-128, AES-256) |
-| Проверка целостности структуры и сверка с оригиналом по дереву объектов | да, `check` |
-| Графическая правка текста прямо на изображении страницы | да |
-| Шрифты Type3 | только чтение |
-| Отсканированные документы (текста нет) | не применимо |
-| Простановка цифровой подписи | нет (см. [Цифровые подписи](#цифровые-подписи)) |
+| Text replacement in `Tj`/`TJ` operators | yes |
+| Embedded fonts and their glyphs preserved | yes |
+| Missing glyphs added to an embedded font | yes, for TrueType |
+| Fallback font embedded when the original will not do | yes |
+| Cyrillic and any other script | yes |
+| Text inside Form XObjects (stamps, letterheads) | yes |
+| Composite Type0/CID fonts (Identity-H) | yes |
+| Simple Type1/TrueType fonts, encodings and `/Differences` | yes |
+| Non-embedded standard fonts | yes, with a warning |
+| `/Info` metadata editing with XMP synchronisation | yes |
+| Original `/ID`, version and structure preserved | yes |
+| Incremental save: original bytes and object numbers unchanged | yes, `--incremental` |
+| In-place stream editing: file length and other object hashes unchanged | yes, `--inplace` |
+| Editing an encrypted document with encryption preserved | yes, when appending (RC4, AES-128, AES-256) |
+| Structural integrity check and object-tree diff against the original | yes, `check` |
+| Graphical editing of text directly on the rendered page | yes |
+| Type3 fonts | read-only |
+| Scanned documents (no text layer) | not applicable |
+| Applying a digital signature | no (see [Digital signatures](#digital-signatures)) |
 
 ---
 
-## Установка
+## Installation
 
-Нужен Python 3.9 или новее.
+Requires Python 3.9 or newer.
 
 ```bash
-git clone <репозиторий> pdfedit && cd pdfedit
+git clone https://github.com/xarrakirri/pdfedit && cd pdfedit
 python3 -m venv .venv
-source .venv/bin/activate          # в Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Зависимости:
+Dependencies:
 
-| Пакет | Зачем |
+| Package | Purpose |
 |---|---|
-| `pikepdf` (≥ 8) | доступ к объектам PDF, разбор и сборка потоков содержимого |
-| `PyMuPDF` (≥ 1.24) | отрисовка страниц для графического режима, метрики стандартных шрифтов |
-| `fonttools` (≥ 4.40) | чтение программ шрифтов, добавление глифов, подмножества |
+| `pikepdf` (≥ 8) | access to PDF objects, parsing and assembling content streams |
+| `PyMuPDF` (≥ 1.24) | page rendering for the graphical mode, standard font metrics |
+| `fonttools` (≥ 4.40) | reading font programs, adding glyphs, subsetting |
 
-Tkinter входит в стандартную библиотеку. В некоторых сборках Linux его ставят
-отдельно: `sudo apt install python3-tk`.
+Tkinter ships with the standard library. Some Linux distributions package it
+separately: `sudo apt install python3-tk`.
 
-Криптографических библиотек не нужно: шифрование дописываемых объектов
-(RC4, AES-128, AES-256) реализовано в `pdfedit/pdfcrypt.py` поверх `hashlib` из
-стандартной библиотеки. Всё работает локально, файлы никуда не отправляются —
-ни на этапе правки, ни при проверке.
+No cryptographic libraries are needed: encryption of appended objects
+(RC4, AES-128, AES-256) is implemented in `pdfedit/pdfcrypt.py` on top of
+`hashlib` from the standard library. Everything runs locally and no file is ever
+sent anywhere — neither during editing nor during validation.
 
-Проверка установки:
+Verify the installation:
 
 ```bash
 python -m pdfedit --version
 ```
 
-Тестовые документы, на которых удобно осваиваться:
+Sample documents to experiment on:
 
 ```bash
 python samples/make_samples.py
@@ -109,559 +114,564 @@ python samples/make_samples.py
 
 ---
 
-## Приложение для macOS
+## macOS application
 
-Программу можно собрать в обычное приложение — с собственным значком, именем в
-строке меню, местом в Dock и связью с файлами PDF.
+The program can be built into a regular application — with its own icon, its own
+name in the menu bar, a place in the Dock and an association with PDF files.
 
 ```bash
 python app/build_app.py --install
 ```
 
-Готовое приложение окажется в `~/Applications/pdfedit.app`, а его копия — в
-`dist/`. Дальше оно живёт своей жизнью: двойной щелчок запускает, PDF можно
-перетащить на значок или открыть через «Открыть в программе».
+The finished application lands in `~/Applications/pdfedit.app`, with a copy in
+`dist/`. From then on it lives its own life: double-click to launch, drag a PDF
+onto the icon, or use "Open With".
 
 ```bash
-open ~/Applications/pdfedit.app                     # просто запустить
-open -a ~/Applications/pdfedit.app договор.pdf      # сразу с документом
+open ~/Applications/pdfedit.app                     # just launch it
+open -a ~/Applications/pdfedit.app contract.pdf     # launch with a document
 ```
 
-**Приложение самодостаточно.** Внутрь связки складывается всё: интерпретатор
-Python со стандартной библиотекой, `pikepdf`, `PyMuPDF`, `fontTools` и сам
-пакет `pdfedit`. Итого около 145 МБ. Каталог с исходным кодом, виртуальное
-окружение и даже Python на компьютере после сборки не нужны — приложение можно
-перенести куда угодно и отдать на другую машину.
+**The application is self-contained.** The bundle holds everything: the Python
+interpreter with its standard library, `pikepdf`, `PyMuPDF`, `fontTools` and the
+`pdfedit` package itself — roughly 145 MB. After the build, the source tree, the
+virtual environment and even Python itself are no longer required on the machine;
+the bundle can be moved anywhere or handed to another computer.
 
-Режимы сборки:
+Build modes:
 
-| Команда | Что получается |
+| Command | Result |
 |---|---|
-| `python app/build_app.py` | самодостаточное приложение в `dist/` |
-| `python app/build_app.py --install` | то же, плюс копия в `~/Applications` |
-| `python app/build_app.py --mode thin` | тонкая обёртка над каталогом разработки: собирается мгновенно, но перестанет работать при его перемещении |
-| `python app/build_app.py --no-sign` | без локальной подписи |
+| `python app/build_app.py` | self-contained application in `dist/` |
+| `python app/build_app.py --install` | the same, plus a copy in `~/Applications` |
+| `python app/build_app.py --mode thin` | a thin wrapper around the development tree: builds instantly, but breaks if the tree moves |
+| `python app/build_app.py --no-sign` | skip local signing |
 
-Значок рисуется программно (`app/make_icon.py`) — лист документа с
-подсвеченной строкой, которую правят. Отдельного файла с картинкой не нужно.
+The icon is drawn programmatically (`app/make_icon.py`) — a sheet of paper with
+the line being edited highlighted. No image file is needed.
 
-**Что происходит при сборке и зачем.** Три вещи, без которых приложение
-работало бы неправильно:
+**What the build does, and why.** Three things, without which the application
+would misbehave:
 
-- *Имя программы.* На macOS интерпретатор из фреймворка передаёт управление
-  вложенной связке `Python.app` — только программа-связка получает доступ к
-  оконной системе. Имя в строке меню, в Dock и в списке процессов система
-  берёт именно у неё, поэтому при сборке её паспорт переписывается, а файл
-  интерпретатора переименовывается. Без этого пользователь видел бы «Python».
-- *Архитектура.* Системный `python3` — универсальная программа, и при запуске
-  из Finder система вполне может выбрать x86_64, тогда как двоичные расширения
-  собраны под архитектуру этого компьютера. Запускающий сценарий задаёт
-  архитектуру явно.
-- *Диагностика.* Вывод программы, запущенной из Finder, обычно пропадает
-  бесследно. Здесь он пишется в `~/Library/Logs/pdfedit.log`, а при аварийном
-  завершении показывается системное окно с последними строками журнала.
+- *Program name.* On macOS the framework interpreter hands control to a nested
+  `Python.app` bundle — only a bundled application gets access to the window
+  server. The system takes the menu-bar name, the Dock name and the process name
+  from that bundle, so the build rewrites its `Info.plist` and renames the
+  interpreter binary. Without this the user would simply see "Python".
+- *Architecture.* The system `python3` is a universal binary, and when launched
+  from Finder macOS may well pick x86_64 while the binary extensions were built
+  for this machine's architecture. The launch script pins the architecture
+  explicitly.
+- *Diagnostics.* Output from a program started via Finder normally vanishes
+  without trace. Here it is written to `~/Library/Logs/pdfedit.log`, and on a
+  crash a system dialog shows the last lines of that log.
 
-Приложение подписывается локально («для себя»). Это не подпись разработчика:
-на другом компьютере macOS при первом запуске спросит подтверждение
-(«Открыть» в контекстном меню значка или «Настройки → Конфиденциальность и
-безопасность»).
+The application is signed locally ("ad-hoc"). This is not a developer signature:
+on another machine macOS will ask for confirmation on first launch (right-click →
+"Open", or System Settings → Privacy & Security).
 
-В других системах связка не собирается — там программа запускается как
-`python -m pdfedit gui`.
+On other platforms no bundle is built — the program runs as `python -m pdfedit gui`.
 
 ---
 
-## Быстрый старт
+## Quick start
 
 ```bash
-python -m pdfedit replace договор.pdf -o договор-исправленный.pdf --old "Иванов" --new "Петров"
+python -m pdfedit replace contract.pdf -o contract-fixed.pdf --old "Smith" --new "Jones"
 ```
 
-Посмотреть, что внутри документа, и откуда брать строки для замены:
+Inspect the document to see what is inside and where to take search strings from:
 
 ```bash
-python -m pdfedit inspect договор.pdf
+python -m pdfedit inspect contract.pdf
 ```
 
-Открыть графический редактор и править текст прямо на листе:
+Open the graphical editor and edit text directly on the page:
 
 ```bash
-python -m pdfedit gui договор.pdf
+python -m pdfedit gui contract.pdf
 ```
 
 ---
 
-## Командная строка
+## Command line
 
-Пять команд: `inspect`, `replace`, `meta`, `verify`, `gui`.
-У каждой есть `--help` с полным списком ключей.
+Five commands: `inspect`, `replace`, `meta`, `verify`, `gui`.
+Each has a `--help` with the full list of options.
 
-### `inspect` — что внутри документа
+### `inspect` — what is inside the document
 
 ```bash
-python -m pdfedit inspect договор.pdf --pages 1-2
+python -m pdfedit inspect contract.pdf --pages 1-2
 ```
 
-Выводит метаданные, список шрифтов с пометкой о внедрении и все текстовые
-фрагменты с координатами:
+Prints metadata, the font list with an embedding note, and every text run with
+its coordinates:
 
 ```
-Файл: договор.pdf
-Страниц: 2; версия 1.7, объектные потоки: нет, линеаризован: нет, XMP: есть
+File: contract.pdf
+Pages: 2; version 1.7, object streams: no, linearised: no, XMP: yes
 
-Словарь /Info:
-  /Author       = Иванов Иван Иванович
+/Info dictionary:
+  /Author       = John Q. Smith
   /CreationDate = D:20210305093000+03'00'
   ...
 
-Шрифты (1):
-  /F0 | /Times New Roman Regular | /Type0 | внедрён: truetype
+Fonts (1):
+  /F0 | /Times New Roman Regular | /Type0 | embedded: truetype
 
-Текстовые фрагменты (10):
-  с.1 #1 /F0 16пт (72,738)-(347,756)
-      'ДОГОВОР № 17-А от 5 марта 2021 года'
+Text runs (10):
+  p.1 #1 /F0 16pt (72,738)-(347,756)
+      'AGREEMENT No. 17-A of 5 March 2021'
 ```
 
-### `replace` — замена текста
+### `replace` — text replacement
 
 ```bash
-# одна замена
-python -m pdfedit replace вход.pdf -o выход.pdf --old "Ромашка" --new "Василёк"
+# a single replacement
+python -m pdfedit replace in.pdf -o out.pdf --old "Acme" --new "Globex"
 
-# несколько за один проход (ключи --old и --new идут парами)
-python -m pdfedit replace вход.pdf -o выход.pdf \
-    --old "Ромашка"  --new "Василёк" \
+# several in one pass (--old and --new come in pairs)
+python -m pdfedit replace in.pdf -o out.pdf \
+    --old "Acme"     --new "Globex" \
     --old "150 000"  --new "200 000"
 
-# посмотреть, что будет заменено, ничего не меняя
-python -m pdfedit replace вход.pdf -o выход.pdf --old "2021" --new "2022" --dry-run
+# see what would be replaced, changing nothing
+python -m pdfedit replace in.pdf -o out.pdf --old "2021" --new "2022" --dry-run
 
-# регулярное выражение и ссылки на группы
-python -m pdfedit replace вход.pdf -o выход.pdf --regex \
-    --old "№ (\d+)-А" --new "№ \1-Б"
+# regular expression with group references
+python -m pdfedit replace in.pdf -o out.pdf --regex \
+    --old "No. (\d+)-A" --new "No. \1-B"
 
-# только первое вхождение, только на страницах 1 и 3–5, без учёта регистра
-python -m pdfedit replace вход.pdf -o выход.pdf --old "иванов" --new "Петров" \
+# first occurrence only, pages 1 and 3-5 only, case-insensitive
+python -m pdfedit replace in.pdf -o out.pdf --old "smith" --new "Jones" \
     --count 1 --pages 1,3-5 --ignore-case
 
-# замена вместе с правкой метаданных
-python -m pdfedit replace вход.pdf -o выход.pdf --old "2021" --new "2022" \
-    --set author="П. П. Петров" --set moddate="2022-04-12 10:00:00"
+# replacement together with a metadata edit
+python -m pdfedit replace in.pdf -o out.pdf --old "2021" --new "2022" \
+    --set author="J. Jones" --set moddate="2022-04-12 10:00:00"
 ```
 
-Основные ключи:
+Main options:
 
-| Ключ | Смысл |
+| Option | Meaning |
 |---|---|
-| `--old` / `--new` | что и на что заменить; указываются парами |
-| `--edits ФАЙЛ.json` | применить список правок, сохранённый из графического режима |
-| `--count N` | заменить только первые N вхождений (0 — все) |
-| `--regex`, `--ignore-case`, `--whole-word` | режимы поиска |
-| `--pages 1,3-5` | ограничить страницами |
-| `--fit РЕЖИМ` | как подгонять ширину, см. [ниже](#режимы-подгонки-ширины) |
-| `--set ПОЛЕ=ЗНАЧЕНИЕ`, `--del ПОЛЕ` | правка метаданных |
-| `--touch-moddate` | проставить текущую дату изменения (по умолчанию дата не трогается) |
-| `--no-font-extension` | не дописывать глифы во внедрённые шрифты |
-| `--no-fallback-font` | не внедрять запасной шрифт |
-| `--font-dir КАТАЛОГ` | где ещё искать шрифты-доноры |
-| `--new-id` | не сохранять исходный `/ID`, а создать новый |
-| `--password` | пароль защищённого документа |
-| `--dry-run` | только показать найденное |
+| `--old` / `--new` | what to replace and with what; given in pairs |
+| `--edits FILE.json` | apply an edit list exported from the graphical mode |
+| `--count N` | replace only the first N occurrences (0 — all) |
+| `--regex`, `--ignore-case`, `--whole-word` | search modes |
+| `--pages 1,3-5` | restrict to pages |
+| `--fit MODE` | how to fit the width, see [below](#width-fitting-modes) |
+| `--set FIELD=VALUE`, `--del FIELD` | metadata editing |
+| `--touch-moddate` | set the current modification date (by default it is left alone) |
+| `--no-font-extension` | do not add glyphs to embedded fonts |
+| `--no-fallback-font` | do not embed a fallback font |
+| `--font-dir DIR` | additional place to look for donor fonts |
+| `--new-id` | generate a new `/ID` instead of preserving the original |
+| `--password` | password for an encrypted document |
+| `--dry-run` | only report what was found |
 
-После сохранения программа сама сверяет результат с оригиналом и печатает отчёт.
+After saving, the program compares the result against the original by itself and
+prints a report.
 
-### `meta` — только метаданные
+### `meta` — metadata only
 
 ```bash
-# посмотреть
-python -m pdfedit meta документ.pdf --show
+# view
+python -m pdfedit meta document.pdf --show
 
-# изменить автора и дату создания, дату изменения удалить
-python -m pdfedit meta вход.pdf -o выход.pdf \
-    --set author="И. И. Иванов" \
+# change author and creation date, remove the modification date
+python -m pdfedit meta in.pdf -o out.pdf \
+    --set author="J. Q. Smith" \
     --set created="2019-01-01 10:00:00" \
     --del moddate --show
 ```
 
-Имена полей принимаются в свободной форме: `author`, `Author`, `/Author`,
-`автор`; `created`, `creationdate`, `датасоздания`; `moddate`, `изменён`.
+Field names are accepted loosely: `author`, `Author`, `/Author`; `created`,
+`creationdate`; `moddate`.
 
-Форматы дат:
+Date formats:
 
-| Запись | Пример |
+| Form | Example |
 |---|---|
-| «человеческий» | `2021-03-05 12:00:00`, `2021-03-05` |
+| human-readable | `2021-03-05 12:00:00`, `2021-03-05` |
 | ISO 8601 | `2021-03-05T12:00:00+03:00` |
-| внутренний формат PDF | `D:20210305120000+03'00'` |
-| текущий момент | `now` |
+| native PDF format | `D:20210305120000+03'00'` |
+| current moment | `now` |
 
-### `verify` — сверка результата с оригиналом
-
-```bash
-python -m pdfedit verify оригинал.pdf результат.pdf
-```
-
-```
-OK словарь /Info: посторонних изменений нет
-OK XMP-метаданные: посторонних изменений нет
-OK идентификатор /ID сохранён
-OK версия PDF совпадает
-OK число страниц совпадает
-```
-
-Код возврата 0 — расхождений нет, 2 — есть.
-
-### `check` — целостность структуры и сверка объект за объектом
+### `verify` — compare the result against the original
 
 ```bash
-# только проверка файла
-python -m pdfedit check результат.pdf
-
-# и сверка с оригиналом: что именно изменилось в дереве объектов
-python -m pdfedit check результат.pdf --original оригинал.pdf
+python -m pdfedit verify original.pdf result.pdf
 ```
 
 ```
-Файл: результат.pdf
-     версия 1.5, страниц 2, объектов 31 (потоков 12), редакций в файле 2
-     шрифтов 3, изображений 4, аннотаций 1
-     /Info: есть, XMP: нет, /ID: есть
-OK нарушений структуры: 0
-
-Вывод: структура цела
-
-Сверка: оригинал.pdf → результат.pdf
-OK число страниц совпадает
-OK посторонних изменений в дереве объектов: 0
-     от самой правки текста изменилось (ожидаемо): 2
-       страница 1/Resources/Font/F1/DescendantFonts[0]/FontDescriptor/FontFile2/Length1: 20372 → 20456
-       страница 1/Resources/Font/F1/DescendantFonts[0]/W: длина массива 84 → 86
-OK изображения: те же
-OK аннотации на месте
-OK метаданные не менялись
-OK идентификатор /ID сохранён
-OK исходные байты файла сохранены (да)
-OK номера объектов сохранены (да)
+OK /Info dictionary: no unintended changes
+OK XMP metadata: no unintended changes
+OK /ID preserved
+OK PDF version matches
+OK page count matches
 ```
 
-Ключ `--strict` отвечает на два вопроса, которых целостность не покрывает.
+Exit code 0 — no discrepancies; 2 — discrepancies found.
 
-**Первый: чем файл выдаёт правку при разборе** (`pdfedit/traces.py`). Документ
-может быть безупречно целым, содержать ровно те изменения, которые
-задумывались, — и всё равно нести на себе следы чужой руки. Часть их видна по
-самому файлу, часть — только в сравнении с оригиналом:
+<a id="check-command"></a>
 
-```
-Следы правки — то, чем файл выдаёт себя при разборе:
-Следов правки не найдено. Проверено:
-  OK в потоках нет неиспользуемых байт за сжатыми данными
-  OK ширины в словаре и в hmtx совпадают (проверено шрифтов: 1)
-  OK в шрифтах-подмножествах нет глифов-сирот (проверено: 1)
-  OK скрытые копии текста совпадают с содержимым страниц
-  OK строки во всех потоках записаны единообразно
-  OK файл состоит из одной редакции
+### `check` — structural integrity and an object-by-object diff
 
-Следы, заметные при сверке с оригиналом:
-Следов правки не найдено. Проверено:
-  OK идентификатор /ID тот же
-  OK /Producer и /Creator не тронуты
-  OK XMP-метаданные не тронуты
-  OK /CreationDate и /ModDate не тронуты
-  OK нумерация объектов сохранена (6 шт.)
-  OK даты внутри шрифтов (head.modified) не тронуты
-  OK порядок таблиц в шрифтах сохранён
-  OK уровень сжатия потоков не изменился
-  OK длина файла не изменилась
-  OK вид таблицы ссылок прежний (таблица xref)
+```bash
+# validate the file only
+python -m pdfedit check result.pdf
+
+# and diff against the original: what exactly changed in the object tree
+python -m pdfedit check result.pdf --original original.pdf
 ```
 
-Что именно ищется:
+```
+File: result.pdf
+     version 1.5, 2 pages, 31 objects (12 streams), 2 revisions in file
+     3 fonts, 4 images, 1 annotation
+     /Info: yes, XMP: no, /ID: yes
+OK structural violations: 0
 
-| признак | что означает |
+Verdict: structure intact
+
+Diff: original.pdf -> result.pdf
+OK page count matches
+OK unintended changes in the object tree: 0
+     changed by the text edit itself (expected): 2
+       page 1/Resources/Font/F1/DescendantFonts[0]/FontDescriptor/FontFile2/Length1: 20372 -> 20456
+       page 1/Resources/Font/F1/DescendantFonts[0]/W: array length 84 -> 86
+OK images: identical
+OK annotations in place
+OK metadata untouched
+OK /ID preserved
+OK original file bytes preserved (yes)
+OK object numbers preserved (yes)
+```
+
+The `--strict` flag answers two questions that integrity alone does not cover.
+
+**First: what gives the edit away under inspection** (`pdfedit/traces.py`). A
+document can be perfectly intact and contain exactly the intended changes — and
+still carry the marks of another hand. Some are visible in the file itself, some
+only in comparison with the original:
+
+```
+Editing traces — what the file reveals under inspection:
+No traces found. Checked:
+  OK no unused bytes after the compressed data in any stream
+  OK widths in the dictionary match hmtx (fonts checked: 1)
+  OK no orphan glyphs in subset fonts (checked: 1)
+  OK hidden text copies match the page content
+  OK strings written consistently across all streams
+  OK file consists of a single revision
+
+Traces visible when compared with the original:
+No traces found. Checked:
+  OK /ID unchanged
+  OK /Producer and /Creator untouched
+  OK XMP metadata untouched
+  OK /CreationDate and /ModDate untouched
+  OK object numbering preserved (6 objects)
+  OK font timestamps (head.modified) untouched
+  OK table order inside fonts preserved
+  OK stream compression level unchanged
+  OK file length unchanged
+  OK cross-reference style unchanged (xref table)
+```
+
+What is actually looked for:
+
+| marker | what it means |
 |---|---|
-| `хвост-в-потоке` | за сжатыми данными лежат неиспользуемые байты — правку на месте добили заполнителем |
-| `уровень-сжатия` | заголовок zlib изменился: поток пересжат другой программой |
-| `разнобой-в-записи` | одна строка записана не так, как все остальные в потоке |
-| `скрытая-копия` | `/ActualText` не совпадает с текстом страницы |
-| `глиф-сирота` | в шрифте-подмножестве есть глиф, на который не ссылается ни один код |
-| `ширины-расходятся` | `/W` (`/Widths`) не совпадает с таблицей `hmtx` шрифта |
-| `дата-шрифта` | изменился `head.modified` — шрифт пересобран |
-| `порядок-таблиц` | таблицы в шрифте лежат в другом порядке |
-| `хинтинг` | изменились `fpgm`, `prep` или `cvt` |
-| `id-изменён`, `дата-изменена`, `производитель-изменён`, `xmp-изменён` | тронуто то, что трогать не следовало |
-| `новые-объекты`, `объекты-исчезли` | нумерация объектов разъехалась |
-| `стиль-xref`, `версия`, `длина-файла` | изменилось оформление контейнера |
+| `stream-tail` | unused bytes sit after the compressed data — an in-place edit was padded out |
+| `compression-level` | the zlib header changed: the stream was recompressed by different software |
+| `inconsistent-writing` | one string is written differently from every other string in the stream |
+| `hidden-copy` | `/ActualText` disagrees with the page text |
+| `orphan-glyph` | a subset font contains a glyph no code refers to |
+| `width-mismatch` | `/W` (`/Widths`) disagrees with the font's `hmtx` table |
+| `font-date` | `head.modified` changed — the font was rebuilt |
+| `table-order` | tables inside the font sit in a different order |
+| `hinting` | `fpgm`, `prep` or `cvt` changed |
+| `id-changed`, `date-changed`, `producer-changed`, `xmp-changed` | something was touched that should not have been |
+| `new-objects`, `objects-vanished` | object numbering drifted |
+| `xref-style`, `version`, `file-length` | the container's presentation changed |
 
-Проверки независимы: сорвавшаяся на необычном документе не отменяет остальные,
-а попадает в отчёт отдельной строкой — молчание приняли бы за «следов нет».
+The checks are independent: one failing on an unusual document does not cancel
+the rest — it goes into the report as its own line, because silence would be read
+as "no traces".
 
-**Второй: за что документ бракуют внешние проверки** — veraPDF, Preflight в
-Acrobat, приёмные системы. Файл может быть цел и не нести следов правки, но не
-проходить их, потому что они спрашивают про соответствие профилю (чаще всего
-PDF/A). Вместе с `--original` замечания делятся на два списка — и это главное:
+**Second: why external validators would reject the document** — veraPDF, Acrobat
+Preflight, ingestion systems. A file can be intact and free of editing traces and
+still fail these, because they ask about profile conformance (most often PDF/A).
+Together with `--original`, the findings are split into two lists — and that split
+is the point:
 
 ```bash
-python -m pdfedit check выход.pdf --original вход.pdf --strict
+python -m pdfedit check out.pdf --original in.pdf --strict
 ```
 
 ```
-Замечания строгих внешних проверок (PDF/A, приёмные системы):
-  -- было и в оригинале:     нет XMP-метаданных (/Metadata) — PDF/A требует их обязательно
-  -- было и в оригинале:     нет /OutputIntents с цветовым профилем — обязателен для PDF/A
-  -- было и в оригинале:     шрифты без /ToUnicode: /SRSXRV+ALSRubl
-  -- было и в оригинале:     используется прозрачность — PDF/A-1 её запрещает
+Findings from strict external validators (PDF/A, ingestion systems):
+  -- present in the original too:  no XMP metadata (/Metadata) — PDF/A requires it
+  -- present in the original too:  no /OutputIntents with a colour profile — required for PDF/A
+  -- present in the original too:  fonts without /ToUnicode: /SRSXRV+ALSRubl
+  -- present in the original too:  transparency is used — PDF/A-1 forbids it
 
-  Все замечания унаследованы от исходного файла: правка их не добавила.
+  All findings are inherited from the source file: the edit added none of them.
 ```
 
-Проверяются: шифрование, отсутствие XMP и `pdfaid:part`, отсутствие
-`/OutputIntents`, отсутствие `/ID`, невнедрённые шрифты, шрифты без
-`/ToUnicode`, прозрачность и число редакций в файле. Последнее — единственное,
-что может появиться от самой правки: `--incremental` добавляет в файл вторую
-редакцию, и приёмные системы иногда этого не любят. Пересборка и `--inplace`
-оставляют документ одной редакцией.
+Checked: encryption, absence of XMP and `pdfaid:part`, absence of
+`/OutputIntents`, absence of `/ID`, non-embedded fonts, fonts without
+`/ToUnicode`, transparency, and the number of revisions in the file. That last
+one is the only item the edit itself can introduce: `--incremental` adds a second
+revision, and ingestion systems sometimes dislike that. Full rebuild and
+`--inplace` both leave the document as a single revision.
 
-Что проверяется в самом файле: открывается ли документ, нет ли ссылок в
-пустоту, распаковывается ли каждый поток, разбирается ли содержимое страниц,
-целы ли программы шрифтов, что с аннотациями и цифровыми подписями. Жалобы
-qpdf на разбор (`parse error`, `EOF while reading token`) считаются
-нарушением: сам разбор содержимого qpdf молча восстанавливает, и без этого
-испорченный поток страницы прошёл бы проверку незамеченным.
+What is checked in the file itself: whether the document opens, whether there are
+dangling references, whether every stream decompresses, whether page content
+parses, whether font programs are intact, and the state of annotations and digital
+signatures. qpdf parse complaints (`parse error`, `EOF while reading token`) count
+as violations: qpdf silently recovers from content-parsing problems, and without
+treating them as violations a corrupted page stream would pass unnoticed.
 
-Сверка обходит оба документа одновременно от корня и называет расхождения
-адресом внутри дерева, а не номером объекта, — номера при полной пересборке
-меняются, а путь остаётся. Изменения, которые вызваны самой правкой текста
-(содержимое страниц, программы шрифтов, `/W`, `/ToUnicode`, `/ActualText`,
-добавленный шрифт в ресурсах), показываются отдельно от посторонних.
+The diff walks both documents simultaneously from the root and names each
+discrepancy by its path inside the tree rather than by object number — numbers
+change on a full rebuild, paths do not. Changes caused by the text edit itself
+(page content, font programs, `/W`, `/ToUnicode`, `/ActualText`, a font added to
+the resources) are shown separately from unintended ones.
 
-Код возврата 0 — файл цел и посторонних изменений нет, 2 — иначе.
+Exit code 0 — file intact and no unintended changes; 2 — otherwise.
 
 ---
 
-## Графический режим
+## Graphical mode
 
 ```bash
-python -m pdfedit gui договор.pdf
+python -m pdfedit gui contract.pdf
 ```
 
-Либо, если собрано [приложение](#приложение-для-macos), — двойным щелчком по
-`pdfedit.app` или по самому PDF через «Открыть в программе».
+Or, if the [application](#macos-application) has been built, by double-clicking
+`pdfedit.app` or the PDF itself via "Open With".
 
-Окно показывает настоящий отрисованный лист. Отрисовывается только видимая
-часть страницы, поэтому расход памяти не зависит ни от увеличения, ни от
-размера листа: у отсканированных документов лист бывает 1900×2800 точек, и
-показ такого целиком при трёхкратном увеличении потребовал бы около
-полугигабайта — система в этот момент снимает программу без предупреждения. Текст правится **прямо на нём**:
+The window shows the real rendered page. Only the visible portion is rendered, so
+memory use depends on neither zoom level nor page size: scanned documents can run
+to 1900×2800 points, and drawing one whole at 3× zoom would need around half a
+gigabyte — at which point the system kills the process without warning. Text is
+edited **directly on the page**:
 
-1. фрагменты, которые можно редактировать, обведены синей рамкой;
-2. щелчок по фрагменту открывает поле ввода ровно на его месте;
-3. `Enter` применяет правку, `Esc` отменяет;
-4. страница сразу перерисовывается **из уже изменённого документа** — видно
-   фактический результат, а не набросок;
-5. изменённые фрагменты подсвечиваются зелёным, неудавшиеся — красным.
+1. editable runs are outlined in blue;
+2. clicking a run opens an input field exactly in its place;
+3. `Enter` applies the edit, `Esc` cancels;
+4. the page is immediately redrawn **from the already-modified document** — you
+   see the actual result, not a preview sketch;
+5. changed runs are highlighted green, failed ones red.
 
-Цвета подсветки:
+Highlight colours:
 
-| Цвет | Значение |
+| Colour | Meaning |
 |---|---|
-| синяя рамка | фрагмент можно редактировать |
-| серая рамка | фрагмент нередактируем (например, шрифт Type3) |
-| зелёная заливка | фрагмент изменён |
-| красная рамка | правку применить не удалось, причина в журнале |
+| blue outline | the run can be edited |
+| grey outline | the run is not editable (a Type3 font, for instance) |
+| green fill | the run has been changed |
+| red outline | the edit could not be applied; the reason is in the log |
 
-Панель справа:
+The right-hand panel:
 
-- **Правки** — список внесённых изменений; двойной щелчок переходит к нужной
-  странице, кнопка «Экспорт…» сохраняет их в JSON для команды
-  `replace --edits`;
-- **Метаданные** — поля `/Info`; пустое поле означает «оставить как было»;
-- **Журнал** — предупреждения, сведения о правке шрифтов, отчёт сверки.
+- **Edits** — the list of changes made; double-click jumps to the relevant page,
+  and "Export…" saves them as JSON for `replace --edits`;
+- **Metadata** — the `/Info` fields; an empty field means "leave as it was";
+- **Log** — warnings, notes about font modifications, the verification report.
 
-Список «Ширина текста» на панели инструментов переключает режим подгонки
-с немедленной перерисовкой — можно сравнить варианты глазами.
+The "Text width" dropdown in the toolbar switches the fitting mode with an
+immediate redraw, so the options can be compared by eye.
 
-Строка меню: «Файл» (открыть, сохранить, импорт и экспорт списка правок),
-«Правка», «Вид», «Справка». При попытке закрыть окно с несохранёнными
-правками программа предупредит и предложит сохранить.
+Menu bar: File (open, save, import and export the edit list), Edit, View, Help.
+Closing the window with unsaved edits raises a warning and offers to save.
 
-Горячие клавиши: `⌘O` — открыть, `⌘S` — сохранить как, `⌘+`/`⌘−` — масштаб,
-`PageUp`/`PageDown` — страницы, `Ctrl` + колесо — масштаб. В Windows и Linux
-вместо `⌘` используется `Ctrl`.
+Shortcuts: `⌘O` open, `⌘S` save as, `⌘+`/`⌘−` zoom, `PageUp`/`PageDown` pages,
+`Ctrl` + wheel zoom. On Windows and Linux, `Ctrl` replaces `⌘`.
 
 ---
 
-## Как это работает
+## How it works
 
-В потоке содержимого PDF нет текста — там лежат **коды глифов конкретного
-шрифта**. Строка `(\x02>\x02h\x02]) Tj` может означать «Дог», а может что
-угодно другое: смысл кодов задаёт шрифт. Поэтому замена идёт в пять шагов.
+A PDF content stream contains no text — it contains **glyph codes of a specific
+font**. The string `(\x02>\x02h\x02]) Tj` might mean "Agr", or anything else
+entirely: the font decides what the codes mean. Replacement therefore proceeds in
+five steps.
 
-**1. Разбор потока.** `pikepdf.parse_content_stream` даёт список операторов.
-Программа проходит по ним, отслеживая полное состояние: матрицу преобразования
-(`cm`, `q`/`Q`), текстовые матрицы `Tm`/`Tlm`, кегль, межсимвольный и
-межсловный интервал, горизонтальное сжатие `Tz`, смещение базовой линии `Ts`
-и цвет заливки. Вложенные Form XObject разбираются рекурсивно.
+**1. Parsing the stream.** `pikepdf.parse_content_stream` yields a list of
+operators. The program walks them while tracking the full graphics state: the
+transformation matrix (`cm`, `q`/`Q`), the text matrices `Tm`/`Tlm`, font size,
+character and word spacing, horizontal scaling `Tz`, text rise `Ts` and fill
+colour. Nested Form XObjects are parsed recursively.
 
-**2. Декодирование.** Для каждого шрифта строится таблица «код → символ»:
-из `/ToUnicode`, из `/Encoding` с `/Differences`, а пробелы в ней закрываются
-по `cmap` самой внедрённой программы шрифта. Соседние глифы собираются в
-**текстовые фрагменты** — визуально связные куски с общим шрифтом, кеглем и
-цветом. Каждый символ помнит, из какого места какого оператора он пришёл.
+**2. Decoding.** For each font a "code → character" table is built: from
+`/ToUnicode`, from `/Encoding` with `/Differences`, with any gaps filled in from
+the `cmap` of the embedded font program itself. Adjacent glyphs are grouped into
+**text runs** — visually coherent pieces sharing a font, size and colour. Every
+character remembers which position of which operator it came from.
 
-**3. Поиск.** Ведётся по тексту фрагментов с нормализацией: неразрывный пробел
-приравнивается к обычному, разные тире — к дефису, лигатура `ﬁ` — к `fi`.
-Найденный диапазон символов переводится обратно в диапазон глифов.
+**3. Searching.** The search runs over run text with normalisation: a non-breaking
+space is treated as an ordinary one, the various dashes as a hyphen, the `ﬁ`
+ligature as `fi`. The matched character range is then translated back into a glyph
+range.
 
-**4. Кодирование нового текста.** Таблица «код → символ» обращается. Ключевая
-тонкость: код с записью в `/ToUnicode` ещё не значит, что глиф есть в шрифте —
-программы, создающие подмножества, часто оставляют таблицу нетронутой, а сами
-глифы «выпотрашивают». Поэтому наличие изображения проверяется по программе
-шрифта, а не по таблице. Если глифа нет, шрифт [расширяется](#работа-со-шрифтами).
+**4. Encoding the new text.** The "code → character" table is inverted. The key
+subtlety: a code having an entry in `/ToUnicode` does not mean the glyph exists in
+the font — subsetting tools frequently leave the table intact while gutting the
+glyphs themselves. Glyph presence is therefore verified against the font program,
+not against the table. If a glyph is missing, the font is
+[extended](#working-with-fonts).
 
-**5. Пересборка оператора.** Операнды раскладываются на «атомы» — отдельные
-глифы и числа кернинга. Заменяемые атомы удаляются, новые байты вставляются на
-их место, соседние склеиваются обратно в строки. Разница ширин компенсируется
-[по выбранному режиму](#режимы-подгонки-ширины). Если получилась одна строка
-без чисел, пишется компактный `Tj` — так поток остаётся максимально похож на
-исходный.
+**5. Reassembling the operator.** The operands are decomposed into "atoms" —
+individual glyphs and kerning numbers. Atoms being replaced are removed, the new
+bytes are inserted in their place, and neighbours are merged back into strings.
+The width difference is compensated according to the
+[chosen mode](#width-fitting-modes). If the result is a single string with no
+numbers, a compact `Tj` is written — keeping the stream as close to the original
+as possible.
 
-Проверка правильности геометрии: вычисленные программой прямоугольники
-фрагментов совпадают с координатами независимого разборщика (PyMuPDF)
-с точностью до долей пункта — это отдельный тест.
+Geometry is verified for correctness: the run rectangles computed by the program
+match the coordinates from an independent parser (PyMuPDF) to within fractions of
+a point — that is a test of its own.
 
 ---
 
-## Режимы подгонки ширины
+## Width-fitting modes
 
-Новый текст почти никогда не совпадает по ширине со старым. Что делать с этой
-разницей — выбирает ключ `--fit`.
+New text almost never matches the old text in width. What to do with the
+difference is chosen by `--fit`.
 
-| Режим | Поведение | Когда брать |
+| Mode | Behaviour | When to use it |
 |---|---|---|
-| `auto` (по умолчанию) | разница до 8 % прячется горизонтальным сжатием, большая — переверстывает строку | обычные опечатки |
-| `natural` | строка переверстывается, хвост сдвигается | правка, где вёрстка может «дышать» |
-| `preserve` | последующий текст остаётся ровно на месте за счёт числовой поправки в `TJ` | таблицы и колонки, где сдвиг недопустим |
-| `squeeze` | новый текст сжимается или растягивается оператором `Tz` ровно под исходную ширину | поля бланков и формы фиксированной ширины |
+| `auto` (default) | a difference under 8 % is hidden by horizontal scaling; a larger one reflows the line | ordinary typos |
+| `natural` | the line reflows and the tail shifts | edits where the layout may breathe |
+| `preserve` | following text stays exactly in place via a numeric correction in `TJ` | tables and columns where shifting is unacceptable |
+| `squeeze` | the new text is scaled by `Tz` to exactly the original width | form fields of fixed width |
 
-Как это выглядит на практике — замена «5 марта 2021» на «12 сентября 2022»
-в строке «… от 5 марта 2021 года»:
+In practice — replacing "5 March 2021" with "12 September 2022" in the line
+"… dated 5 March 2021 of the year":
 
-- `natural` — слово «года» уезжает правее;
-- `preserve` — «года» остаётся на прежнем месте, но новый текст на него
-  наезжает, потому что он длиннее;
-- `squeeze` — «года» на прежнем месте, новый текст вписан в исходную ширину;
-- `auto` — выбирает `squeeze` при небольшой разнице, иначе `natural`.
+- `natural` — "of the year" moves further right;
+- `preserve` — "of the year" stays put, but the new text overlaps it, being longer;
+- `squeeze` — "of the year" stays put and the new text is fitted into the original width;
+- `auto` — picks `squeeze` for a small difference, `natural` otherwise.
 
-`preserve` честно сохраняет положение всего последующего текста, но при большой
-разнице ширин это означает наложение — режим для случаев, когда сдвиг хуже
-наложения.
-
----
-
-## Работа со шрифтами
-
-Когда в шрифте нет нужных глифов (обычный случай: документ набран латиницей,
-а вставляется кириллица), программа действует по очереди:
-
-**1. Расширение внедрённого подмножества.** Контуры недостающих глифов берутся
-из системного шрифта того же семейства и дописываются во внедрённую программу.
-Составные глифы разбираются на простые (иначе ссылки на номера глифов донора
-оказались бы неверными), при несовпадении кегельного куба контуры
-масштабируются. Обновляются `/W` или `/Widths`, `/Differences`, `/CIDSet` и
-`/ToUnicode`. Внешне результат неотличим от исходного набора: те же контуры,
-те же метрики.
-
-```
-шрифт: Times New Roman Regular: добавлены глифы ' «»ОРакмош' из «Times New Roman»
-```
-
-Для простых однобайтовых шрифтов новым символам отдаются коды, которыми в
-документе не набран ни один символ, — переопределить их через `/Differences`
-безопасно.
-
-**2. Внедрение запасного шрифта.** Если донора того же семейства нет, формат
-программы не поддаётся правке (CFF/Type1) или шрифт вообще не внедрён,
-в документ добавляется новый шрифт Type0, и им набирается только изменённый
-фрагмент. Вокруг вставки ставятся операторы `Tf`, возвращающие исходный шрифт,
-так что остальной текст не затрагивается.
-
-**3. Отказ.** Если запрещено и то и другое (`--no-font-extension
---no-fallback-font`), правка пропускается с объяснением причины.
-
-Шрифты ищутся в системных каталогах (`/System/Library/Fonts`, `/Library/Fonts`,
-`C:/Windows/Fonts`, `/usr/share/fonts` и т. п.); индекс кэшируется в
-`~/.cache/pdfedit/fontindex.json`. Дополнительные каталоги — ключом `--font-dir`.
-
-**Невнедрённые шрифты.** Если шрифт не внедрён, его глифы рисует система
-читателя. Программа предупреждает об этом и по умолчанию внедряет запасной
-шрифт, чтобы документ выглядел одинаково везде.
+`preserve` genuinely keeps the position of all following text, but with a large
+width difference that means overlap — it is the mode for cases where shifting is
+worse than overlapping.
 
 ---
 
-## Библиотека шрифтов-доноров
+## Working with fonts
 
-Документ несёт не весь шрифт, а только те глифы, что в нём встретились. Набран
-латиницей — кириллицы внутри нет, и вставить её нечем. Недостающие буквы
-приходится брать со стороны, и источников три; программа перебирает их в таком
-порядке:
+When the font lacks the required glyphs (the common case: a document typeset in
+Latin script into which Cyrillic is being inserted), the program tries three
+things in order:
 
-1. **Другие шрифты этого же документа.** Один и тот же шрифт нередко внедрён
-   в файл несколько раз разными подмножествами: в заголовках есть буквы,
-   которых нет в основном тексте. Это буквально те же контуры — лучше источника
-   не найти. Работает само, отключается ключом `--no-document-fonts`.
-2. **Личная библиотека**, собранная из других PDF. Например, из документов того
-   же издателя, где нужные символы есть.
-3. **Системные шрифты** — по семейству, начертанию и роду.
+**1. Extending the embedded subset.** Outlines for the missing glyphs are taken
+from a system font of the same family and appended to the embedded program.
+Composite glyphs are decomposed into simple ones (otherwise the references to the
+donor's glyph indices would be wrong), and outlines are scaled if the units per em
+differ. `/W` or `/Widths`, `/Differences`, `/CIDSet` and `/ToUnicode` are all
+updated. The result is outwardly indistinguishable from the original set: the same
+outlines, the same metrics.
 
-Пополнение библиотеки:
+```
+font: Times New Roman Regular: glyphs ' «»ABCDEFG' added from "Times New Roman"
+```
+
+For simple single-byte fonts, new characters are assigned codes that no character
+in the document uses — redefining those through `/Differences` is safe.
+
+**2. Embedding a fallback font.** If no donor of the same family exists, the
+program format cannot be edited (CFF/Type1), or the font was never embedded at
+all, a new Type0 font is added to the document and used to typeset the changed run
+only. `Tf` operators restoring the original font are placed around the insertion,
+so the surrounding text is unaffected.
+
+**3. Refusal.** If both are forbidden (`--no-font-extension --no-fallback-font`),
+the edit is skipped with an explanation.
+
+Fonts are looked up in the system directories (`/System/Library/Fonts`,
+`/Library/Fonts`, `C:/Windows/Fonts`, `/usr/share/fonts` and so on); the index is
+cached in `~/.cache/pdfedit/fontindex.json`. Additional directories are given with
+`--font-dir`.
+
+**Non-embedded fonts.** If a font is not embedded, its glyphs are drawn by the
+reader's system. The program warns about this and by default embeds a fallback
+font so that the document looks the same everywhere.
+
+---
+
+## Donor font library
+
+A document does not carry the whole font, only the glyphs it actually used. Set in
+Latin script, it contains no Cyrillic, and there is nothing to insert it with. The
+missing letters have to come from outside, and there are three sources; the program
+tries them in this order:
+
+1. **Other fonts in the same document.** The same typeface is often embedded
+   several times as different subsets: the headings contain letters the body text
+   does not. These are literally the same outlines — no better source exists. This
+   works automatically; disable it with `--no-document-fonts`.
+2. **A personal library** assembled from other PDFs — for example, from documents
+   by the same publisher that do contain the needed characters.
+3. **System fonts** — matched by family, weight and style.
+
+Adding to the library:
 
 ```bash
-python -m pdfedit fonts add документ-с-нужными-буквами.pdf
+python -m pdfedit fonts add document-with-the-right-letters.pdf
 python -m pdfedit fonts list
 python -m pdfedit fonts remove Times
 python -m pdfedit fonts clear
 ```
 
-Посмотреть, что внедрено в файл, ничего никуда не добавляя:
+See what a file has embedded, without adding anything anywhere:
 
 ```bash
-python -m pdfedit fonts show документ.pdf
+python -m pdfedit fonts show document.pdf
 ```
 
 ```
-  + TimesNewRomanPS-BoldMT     truetype   символов: 77
-  + TimesNewRomanPSMT          truetype   символов: 121
-  - Times-Bold                 нет        шрифт не внедрён в документ — брать нечего
+  + TimesNewRomanPS-BoldMT     truetype   characters: 77
+  + TimesNewRomanPSMT          truetype   characters: 121
+  - Times-Bold                 none       font not embedded in the document — nothing to take
 ```
 
-В графическом режиме то же самое лежит в меню «Шрифты»: добавление из PDF,
-просмотр библиотеки и переключатели источников.
+In the graphical mode the same lives under the Fonts menu: importing from a PDF,
+browsing the library, and toggles for the sources.
 
-**Восстановление таблицы символов.** Извлечённое из PDF подмножество почти
-всегда идёт без таблицы `cmap`: для показа страницы она не нужна, коды глифов
-записаны прямо в потоке содержимого. Донору же она необходима — иначе шрифт не
-может ответить, есть ли у него нужная буква. Программа восстанавливает эту
-таблицу по данным документа (`/ToUnicode` и кодировка), после чего извлечённый
-шрифт становится обычным самодостаточным файлом.
+**Rebuilding the character map.** A subset extracted from a PDF almost always
+arrives without a `cmap` table: rendering the page does not need one, since glyph
+codes are written straight into the content stream. A donor, however, requires it —
+otherwise the font cannot answer whether it has a given letter. The program
+reconstructs that table from the document's own data (`/ToUnicode` and the
+encoding), after which the extracted font becomes an ordinary self-sufficient font
+file.
 
-Ограничение: шрифты в формате Type1 и «голый» CFF как доноры не поддерживаются
-— их программа не является самостоятельным файлом шрифта. Такие записи
-помечаются в выводе, замена для них идёт через системные шрифты.
+Limitation: Type1 and bare CFF fonts are not supported as donors — their programs
+are not standalone font files. Such entries are flagged in the output, and
+replacement for them goes through system fonts.
 
-Библиотека лежит в `~/Library/Application Support/pdfedit/fonts` (macOS),
-`~/.local/share/pdfedit/fonts` (Linux) или `%APPDATA%\pdfedit\fonts` (Windows).
-Каталог можно переназначить переменной `PDFEDIT_FONT_LIBRARY`.
+The library lives in `~/Library/Application Support/pdfedit/fonts` (macOS),
+`~/.local/share/pdfedit/fonts` (Linux) or `%APPDATA%\pdfedit\fonts` (Windows). The
+directory can be redirected with the `PDFEDIT_FONT_LIBRARY` environment variable.
 
 ---
 
-## Метаданные
+## Metadata
 
-Метаданные живут в PDF в двух местах, и они обязаны совпадать: словарь `/Info`
-в трейлере и поток XMP в `/Root /Metadata`. Рассогласование между ними — первое,
-что показывают программы проверки документов, поэтому при любой правке
-значения синхронизируются:
+Metadata lives in two places in a PDF, and the two are required to agree: the
+`/Info` dictionary in the trailer and the XMP stream in `/Root /Metadata`. A
+disagreement between them is the first thing document-inspection tools point at, so
+any edit synchronises the values:
 
-| Поле `/Info` | Свойство XMP |
+| `/Info` field | XMP property |
 |---|---|
 | `/Title` | `dc:title` |
 | `/Author` | `dc:creator` |
@@ -672,610 +682,613 @@ python -m pdfedit fonts show документ.pdf
 | `/CreationDate` | `xmp:CreateDate` |
 | `/ModDate` | `xmp:ModifyDate` |
 
-Ключ `--xmp` управляет поведением: `auto` — обновлять существующий поток
-(по умолчанию), `always` — создать при отсутствии, `never` — не трогать.
+The `--xmp` option controls the behaviour: `auto` — update the existing stream
+(default), `always` — create one if absent, `never` — leave it alone.
 
 ---
 
-## Три режима сохранения
+## Three saving modes
 
-У сохранения три разные цели, и выбирать между ними приходится осознанно.
+Saving has three distinct goals, and choosing between them has to be deliberate.
 
-| | **Полная пересборка** (по умолчанию) | **Дописывание** (`--incremental`) | **Правка на месте** (`--inplace`) |
+| | **Full rebuild** (default) | **Incremental** (`--incremental`) | **In-place** (`--inplace`) |
 |---|---|---|---|
-| Исходные байты файла | переписываются | остаются нетронутыми | меняются только внутри правленых потоков |
-| Длина файла | другая | больше на размер слоя | **та же** |
-| Номера объектов | qpdf перенумеровывает | те же самые | те же самые |
-| Неизменённые объекты | перезаписываются (содержимое то же) | не трогаются | **совпадают по хешам байт в байт** |
-| `/ID`, `/Info`, даты | восстанавливаются после записи | не трогаются | физически не переписываются |
-| `/Encrypt`, пароль, права | снимаются, если не просить обратного | сохраняются как есть | сохраняются как есть |
-| Число редакций (`%%EOF`) | одна | становится на одну больше | **не меняется** |
-| Прежний текст остаётся в файле | нет | да, в старой редакции | нет, затирается |
-| Когда применимо | всегда | всегда | когда правка помещается в исходную длину потока |
+| Original file bytes | rewritten | left untouched | changed only inside edited streams |
+| File length | different | larger by the size of the layer | **the same** |
+| Object numbers | qpdf renumbers them | unchanged | unchanged |
+| Unchanged objects | rewritten (same content) | untouched | **byte-for-byte identical by hash** |
+| `/ID`, `/Info`, dates | restored after writing | untouched | never physically rewritten |
+| `/Encrypt`, password, permissions | dropped unless asked otherwise | preserved as-is | preserved as-is |
+| Revision count (`%%EOF`) | one | one more than before | **unchanged** |
+| Previous text remains in the file | no | yes, in the old revision | no, overwritten |
+| When applicable | always | always | when the edit fits the original stream length |
 
-Правка на месте — самый бережный вариант и прямой ответ на вопрос «остался ли
-файл тем же»: сравнение по хешам показывает, что изменился ровно один объект.
+In-place editing is the most conservative option and a direct answer to the
+question "is this still the same file?": a hash comparison shows that exactly one
+object changed.
 
 ```bash
-python -m pdfedit replace вход.pdf -o выход.pdf --old Иванов --new Иван --inplace
+python -m pdfedit replace in.pdf -o out.pdf --old Smith --new Jones --inplace
 ```
 
 ```
-Правка на месте:
-записано на месте объектов: 1 (заполнителя 2 байт)
+In-place edit:
+objects written in place: 1 (2 bytes of padding)
      12 0 R
-длина файла: не изменилась
+file length: unchanged
 ```
 
 ```bash
-python -m pdfedit check выход.pdf --original вход.pdf --hashes
+python -m pdfedit check out.pdf --original in.pdf --hashes
 ```
 
 ```
-Хеши объектов: 27 из 28 совпадают байт в байт
-OK объектов исчезло: 0
-     изменено: 1
-       12 0 R — содержимое страницы 1: изменились данные
-           инструкция #37: «Итого» Tj  →  «Итог» Tj
-OK байты файла: длина не изменилась, различий 802 байта — это правка потоков на месте
+Object hashes: 27 of 28 match byte for byte
+OK objects vanished: 0
+     changed: 1
+       12 0 R — page 1 content: data changed
+           instruction #37: "Total" Tj  ->  "Tota" Tj
+OK file bytes: length unchanged, 802 bytes differ — this is the in-place stream edit
 ```
 
-Отчёт называет не только номер объекта, но и его роль в документе
-(«содержимое страницы 1», «программа шрифта X», «таблица `/ToUnicode`
-шрифта X», «изображение на странице 3») и разбирает само изменение: для
-содержимого — какие инструкции разошлись, с текстом, раскодированным через
-кодировку того шрифта, который действовал в этом месте. Для правок,
-потребовавших новых глифов, это выглядит так:
+The report names not only the object number but its role in the document
+("page 1 content", "font program X", "`/ToUnicode` table of font X", "image on
+page 3") and breaks down the change itself: for content, which instructions
+diverged, with the text decoded through the encoding of whatever font was in
+effect at that point. For edits that required new glyphs it looks like this:
 
 ```
-     изменено: 4
-       12 0 R — содержимое страницы 1: изменились данные
-           начиная с инструкции #37: было «Итого» Tj
-                                     стало 102.717 Tz | «Итог» Tj | 100 Tz
-       19 0 R — программа шрифта /UUUPYY+TinkoffSans-Medium: изменились словарь и данные
-           ключ /Length1: 5144 → 5296
-           данные: 5144 → 5296 байт
-       21 0 R — составная часть шрифта /UUUPYY+TinkoffSans-Medium: изменился словарь
-           ключ /W: массив 14 → 16 элементов
-       22 0 R — таблица /ToUnicode шрифта /UUUPYY+TinkoffSans-Medium: изменились данные
-           данные: 447 → 434 байт
+     changed: 4
+       12 0 R — page 1 content: data changed
+           from instruction #37: was "Total" Tj
+                                 now 102.717 Tz | "Tota" Tj | 100 Tz
+       19 0 R — font program /UUUPYY+TinkoffSans-Medium: dictionary and data changed
+           key /Length1: 5144 -> 5296
+           data: 5144 -> 5296 bytes
+       21 0 R — descendant of font /UUUPYY+TinkoffSans-Medium: dictionary changed
+           key /W: array 14 -> 16 elements
+       22 0 R — /ToUnicode table of font /UUUPYY+TinkoffSans-Medium: data changed
+           data: 447 -> 434 bytes
 ```
 
-Как это работает. Данные потока переписываются поверх старых, а разница в
-длине добивается заполнителем: декодер Flate останавливается на конце сжатых
-данных и хвост за ними не читает, поэтому `/Length` остаётся прежним, а с ним
-и все смещения объектов, таблица ссылок и трейлер. Чтобы новые данные вообще
-поместились, поток не пересобирается целиком: изменённые инструкции заменяются
-прямо в исходных байтах (`pdfedit/streampatch.py`), а нетронутые остаются теми
-же байтами. Пересборка целиком стабильно дала бы +2…4 % длины просто из-за
-другого форматирования — и правка перестала бы влезать.
+How this works. The stream data is written over the old data, and the difference in
+length is made up with padding: the Flate decoder stops at the end of the
+compressed data and never reads the tail beyond it, so `/Length` stays the same,
+and with it every object offset, the cross-reference table and the trailer. For the
+new data to fit at all, the stream is not reassembled wholesale: changed
+instructions are substituted directly into the original bytes
+(`pdfedit/streampatch.py`), while untouched ones remain the very same bytes. A full
+reassembly would reliably add 2–4 % of length purely from different formatting —
+and the edit would stop fitting.
 
-Когда правка на месте не срабатывает (текст стал длиннее, изменился словарь
-потока, объект лежит в сжатом `/ObjStm`, у потока есть `/DecodeParms`), она
-отступает: такие объекты дописываются слоем, и результат остаётся корректным.
-Отчёт показывает, что именно не поместилось и почему. На проверочной выборке
-из 59 файлов правка «убрать букву из слова» легла полностью на место в 41
-файле; в остальных часть ушла в слой.
+When an in-place edit does not work out (the text grew longer, the stream
+dictionary changed, the object lives in a compressed `/ObjStm`, the stream has
+`/DecodeParms`), it falls back: such objects are appended as a layer, and the
+result remains correct. The report shows exactly what did not fit and why. On a
+test set of 59 files, a "remove one letter from a word" edit landed fully in place
+in 41 files; in the rest, part went into the layer.
 
-Отдельное ограничение: страницы, у которых `/Contents` — массив из нескольких
-потоков, правка на месте не берёт. Редактор разбирает такой массив как одно
-склеенное содержимое и при записи сворачивает его в первый поток, меняя словарь
-страницы; на месте это невыразимо. В проверочной выборке таких файлов 2 из 63.
+A separate limitation: pages whose `/Contents` is an array of several streams are
+not handled in place. The editor parses such an array as one concatenated content
+and, on writing, collapses it into the first stream, changing the page dictionary;
+that is inexpressible in place. In the test set, 2 files out of 63 are like this.
 
-Дописывание — это штатный механизм PDF (ISO 32000-1, 7.5.6): в конец файла
-добавляются новые редакции только изменившихся объектов и новая таблица
-ссылок со ссылкой `/Prev` на предыдущую. Ридер читает последнюю таблицу,
-берёт оттуда новые смещения изменённых объектов, а всё остальное — потоки
-нетронутых страниц, шрифты, изображения, аннотации, дерево структуры —
-читает из исходной части файла. Она физически та же самая, поэтому испортить
-её невозможно в принципе.
+Incremental saving is a standard PDF mechanism (ISO 32000-1, 7.5.6): new revisions
+of only the changed objects, plus a new cross-reference table with a `/Prev` link to
+the previous one, are appended to the end of the file. The reader reads the last
+table, takes the new offsets of the changed objects from it, and reads everything
+else — the streams of untouched pages, fonts, images, annotations, the structure
+tree — from the original part of the file. That part is physically the same, so
+corrupting it is impossible in principle.
 
 ```bash
-python -m pdfedit replace вход.pdf -o выход.pdf --old Иванов --new Петров --incremental
+python -m pdfedit replace in.pdf -o out.pdf --old Smith --new Jones --incremental
 ```
 
-Отчёт после сохранения показывает, что именно дописано:
+The post-save report shows exactly what was appended:
 
 ```
-Дописанный слой правок:
-дописано объектов: 4 (изменено 4, добавлено 0)
-таблица ссылок: xref
-прирост файла: 15619 байт
-новые редакции: 8 0 R, 16 0 R, 18 0 R, 19 0 R
+Appended edit layer:
+objects appended: 4 (4 changed, 0 added)
+cross-reference: xref
+file growth: 15619 bytes
+new revisions: 8 0 R, 16 0 R, 18 0 R, 19 0 R
 ```
 
-Тип новой таблицы ссылок всегда совпадает с типом старой: классическая
-таблица `xref` — к таблице, поток `/XRef` — к потоку. Иначе ридер, который до
-правки читал документ, встретил бы незнакомую конструкцию. Объект, лежавший в
-сжатом объектном потоке `/ObjStm`, при перезаписи выносится наружу обычным
-объектом — это спецификацией разрешено.
+The type of the new cross-reference always matches the old one: a classic `xref`
+table gets a table, an `/XRef` stream gets a stream. Otherwise a reader that could
+read the document before the edit would meet an unfamiliar construct. An object
+that lived inside a compressed `/ObjStm` is moved out as an ordinary object when
+rewritten — the specification permits this.
 
-Перед записью результат перечитывается и сверяется с документом в памяти:
-исходные байты должны остаться на месте, число страниц — совпасть, а каждый
-дописанный объект — прочитаться ровно тем, чем он был. Если что-то не сошлось,
-файл не записывается вовсе.
+Before writing, the result is re-read and compared against the in-memory document:
+the original bytes must still be in place, the page count must match, and every
+appended object must read back as exactly what it was. If anything disagrees, the
+file is not written at all.
 
-Чего дописывание не делает:
+What incremental saving does not do:
 
-- **Линеаризация («быстрый просмотр в вебе») перестаёт быть достоверной** —
-  выдаётся предупреждение. На чтение это не влияет, но строгая проверка
-  линеаризации на это укажет.
-- **Прежний текст остаётся в файле.** Старая редакция потока никуда не
-  девается — она лежит в исходной части. Это плата за неприкосновенность
-  оригинала: если нужен файл без следов правки, нужен режим полной пересборки.
+- **Linearisation ("fast web view") stops being trustworthy** — a warning is
+  issued. This does not affect reading, but a strict linearisation check will point
+  at it.
+- **The previous text stays in the file.** The old revision of the stream does not
+  go anywhere — it sits in the original part. That is the price of leaving the
+  original inviolate: if you need a file with no trace of the edit, you need the
+  full-rebuild mode.
 
 ---
 
-## Защищённые документы
+## Encrypted documents
 
-Документ с `/Encrypt` открывается по паролю (`--password`), а вот сохраняется
-по-разному.
+A document with `/Encrypt` is opened with a password (`--password`), but saving
+works differently depending on the mode.
 
-**При дописывании защита сохраняется полностью.** Словарь `/Encrypt` остаётся
-исходным — вместе с владельческим паролем, правами и алгоритмом. Дописанные
-объекты шифруются тем же ключом документа: ключ отдаёт qpdf, ключ объекта
-считается по алгоритму 1 из ISO 32000-1 (MD5 от ключа файла с номером и
-поколением объекта, для AES — с меткой `sAlT`), шифр — RC4 или AES-CBC.
-Поддерживаются `/V` 1–5, то есть RC4 40–128 бит, AES-128 (`/AESV2`) и AES-256
-(`/AESV3`). AES реализован в самой программе (`pdfedit/pdfcrypt.py`), внешних
-криптобиблиотек не требуется; правильность проверяется контрольными примерами
-из FIPS-197.
+**Incremental saving preserves encryption completely.** The `/Encrypt` dictionary
+stays as it was — along with the owner password, the permissions and the algorithm.
+Appended objects are encrypted with the same document key: the key comes from qpdf,
+the object key is derived by Algorithm 1 of ISO 32000-1 (MD5 of the file key with
+the object number and generation, plus the `sAlT` marker for AES), and the cipher
+is RC4 or AES-CBC. `/V` 1–5 are supported, that is RC4 40–128 bit, AES-128
+(`/AESV2`) and AES-256 (`/AESV3`). AES is implemented in the program itself
+(`pdfedit/pdfcrypt.py`), requiring no external crypto libraries; correctness is
+verified against the FIPS-197 test vectors.
 
-**При полной пересборке защита по умолчанию снимается** — об этом выводится
-предупреждение. Ключ `--keep-encryption` воспроизводит её: тот же алгоритм, та
-же длина ключа, те же права. Но два обстоятельства воспроизвести нельзя, и
-программа говорит об этом прямо:
+**A full rebuild drops encryption by default** — with a warning. The
+`--keep-encryption` option reproduces it: the same algorithm, the same key length,
+the same permissions. But two things cannot be reproduced, and the program says so
+plainly:
 
-- **владельческий пароль.** В файле он хранится не сам по себе, а в виде
-  проверочного значения `/O`, из которого исходный пароль не восстанавливается.
-  Свой можно задать ключом `--owner-password`; иначе он будет пустым, и права
-  формально останутся, но снять их сможет кто угодно;
-- **`/ID`.** Из него выводится ключ шифрования, поэтому подменить `/ID` в уже
-  записанном зашифрованном файле нельзя — документ перестал бы открываться.
+- **the owner password.** The file does not store it as such, only a verification
+  value `/O` from which the original password cannot be recovered. You can set your
+  own with `--owner-password`; otherwise it will be empty, and the permissions,
+  while formally present, could be lifted by anyone;
+- **`/ID`.** The encryption key is derived from it, so `/ID` cannot be substituted
+  in an already-written encrypted file — the document would stop opening.
 
 ```bash
-python -m pdfedit replace защищённый.pdf -o итог.pdf --old 2021 --new 2022 \
+python -m pdfedit replace encrypted.pdf -o out.pdf --old 2021 --new 2022 \
     --keep-encryption --owner-password 'MySecret1'
 ```
 
 ---
 
-## Цифровые подписи
+## Digital signatures
 
-Любая правка текста делает подпись недействительной — в этом и состоит смысл
-подписи. Обойти это нельзя: подпись покрывает байты документа криптографически,
-и никакой способ записи не заставит проверяющую программу снова сказать
-«подпись действительна» для изменённого содержимого. Программа и не пытается
-этого делать.
+Any text edit invalidates a signature — that is precisely what a signature is for.
+There is no way around it: the signature covers the document's bytes
+cryptographically, and no method of writing will make a verifier say "signature
+valid" again for changed content. The program does not attempt it.
 
-Что реально можно выбрать — как именно факт правки будет виден:
+What can actually be chosen is *how* the fact of the edit becomes visible:
 
-- **Дописывание (`--incremental`).** Подписанная редакция остаётся в файле
-  байт в байт, поэтому подпись остаётся математически проверяемой *для своей
-  редакции*: диапазон `/ByteRange` цел, хеш сходится. Acrobat и другие ридеры
-  показывают такой документ как «подписано, документ изменён после подписания»
-  и дают посмотреть подписанную версию. Именно так работают все программы,
-  добавляющие в подписанный документ пометки и вторые подписи.
-- **Полная пересборка.** Подпись превращается в бессмысленный объект: байты,
-  которые она покрывала, больше не существуют. Ридер сообщит, что подпись
-  недействительна или повреждена.
-- **Осмысленный третий путь** — снять поле подписи и подписать документ заново
-  своим сертификатом. Первое делается удалением `/Sig` из `/AcroForm`, второе —
-  средствами, у которых есть доступ к закрытому ключу (`pyHanko`, Acrobat,
-  КриптоПро). pdfedit подписи не ставит.
+- **Incremental (`--incremental`).** The signed revision stays in the file byte for
+  byte, so the signature remains mathematically verifiable *for its own revision*:
+  the `/ByteRange` is intact and the hash checks out. Acrobat and other readers show
+  such a document as "signed, document has been modified since signing" and let you
+  view the signed version. This is exactly how every tool that adds annotations or
+  countersignatures to a signed document works.
+- **Full rebuild.** The signature becomes a meaningless object: the bytes it covered
+  no longer exist. The reader will report the signature as invalid or damaged.
+- **The sensible third path** is to remove the signature field and re-sign the
+  document with your own certificate. The first is done by deleting `/Sig` from
+  `/AcroForm`; the second requires tools with access to a private key (`pyHanko`,
+  Acrobat). pdfedit does not apply signatures.
 
-Команда `check` показывает состояние подписей: какие поля есть, чем подписано,
-и покрывает ли `/ByteRange` файл целиком.
+The `check` command reports the state of signatures: which fields exist, what signed
+them, and whether the `/ByteRange` covers the whole file.
 
 ```
-     цифровых подписей: 1
-     поле «Signature2» (/adbe.pkcs7.detached, подписано D:20260804193722+07'00'):
-     покрывает 4730785 из 4786468 байт — файл изменён после подписания
+     digital signatures: 1
+     field "Signature2" (/adbe.pkcs7.detached, signed D:20260804193722+07'00'):
+     covers 4730785 of 4786468 bytes — file modified after signing
 ```
 
 ---
 
-## Проверка структуры
+## Structural validation
 
-Команда [`check`](#check--целостность-структуры-и-сверка-объект-за-объектом)
-и функции `check_file` / `compare_files` из `pdfedit.validate`. Проверка
-работает только с локальными файлами и ничего никуда не отправляет.
+The [`check`](#check-command) command,
+and the `check_file` / `compare_files` functions from `pdfedit.validate`.
+Validation works on local files only and sends nothing anywhere.
 
 ---
 
-## Отсутствие следов правки
+## Leaving no editing traces
 
-Речь о режиме по умолчанию — полной пересборке. Выходной файл создаётся заново
-и целиком: никаких дописанных в конец слоёв, по которым исходный текст
-восстанавливается тривиально (если нужна обратная цель — неприкосновенность
-оригинала ценой видимого слоя правок, — см. [Три режима
-сохранения](#три-режима-сохранения)). Что делается для того, чтобы результат не
-отличался от оригинала ничем, кроме самого изменённого текста:
+This concerns the default mode — the full rebuild. The output file is created anew
+and in its entirety: no layers appended at the end from which the original text
+could be recovered trivially (if you want the opposite — the original left
+inviolate at the cost of a visible edit layer — see
+[Three saving modes](#three-saving-modes)). What is done so that the result differs
+from the original in nothing but the changed text itself:
 
-- **Метаданные не трогаются.** `/Info` и XMP переносятся как есть; меняется
-  только то, что пользователь задал явно. Дата изменения **не** обновляется
-  автоматически — для этого есть отдельный ключ `--touch-moddate`.
-- **Библиотеки не подписывают свою работу.** pikepdf по умолчанию прописывает
-  себя в `pdf:Producer` и `xmp:CreatorTool` — это подавлено.
-- **`/ID` сохраняется.** qpdf при записи берёт первую строку идентификатора из
-  оригинала, вторую генерирует заново, а если `/ID` не было — добавляет его.
-  Исходное значение восстанавливается правкой уже записанных байтов; когда
-  длина совпадает, размер файла не меняется вовсе, иначе результат проверяется
-  повторным открытием документа.
-- **Структура воспроизводится.** Версия PDF в заголовке, наличие сжатых
-  объектных потоков `/ObjStm`, линеаризация — как в оригинале. PDF 1.4,
-  внезапно получивший объектные потоки, выдал бы правку сразу.
-- **Содержимое не переписывается «канонически».** Затрагиваются только
-  изменённые операторы; неизменённые потоки и объекты сохраняют исходный вид.
-- **Один `%%EOF`** — отдельная проверка в тестах.
+- **Metadata is not touched.** `/Info` and XMP are carried over as they are; only
+  what the user set explicitly changes. The modification date is **not** updated
+  automatically — there is a separate `--touch-moddate` option for that.
+- **Libraries do not sign their work.** pikepdf writes itself into `pdf:Producer`
+  and `xmp:CreatorTool` by default — that is suppressed.
+- **`/ID` is preserved.** On writing, qpdf takes the first string of the identifier
+  from the original, regenerates the second, and adds an `/ID` if there was none.
+  The original value is restored by patching the already-written bytes; when the
+  length matches, the file size does not change at all, and otherwise the result is
+  verified by reopening the document.
+- **Structure is reproduced.** The PDF version in the header, the presence of
+  compressed `/ObjStm` object streams, and linearisation all follow the original. A
+  PDF 1.4 that suddenly acquired object streams would give the edit away at once.
+- **Content is not rewritten "canonically".** Only the changed operators are
+  touched; unchanged streams and objects keep their original form.
+- **A single `%%EOF`** — a dedicated check in the test suite.
 
-Команда `verify` сверяет результат с оригиналом и показывает, что именно
-разошлось; изменения, внесённые пользователем сознательно, помечаются
-отдельно и не считаются расхождением.
+The `verify` command compares the result against the original and shows exactly
+what diverged; changes the user made deliberately are flagged separately and do not
+count as discrepancies.
 
-### Разорванный текст
+### Split text
 
-Число «1234567» на экране одно, а в потоке содержимого их может быть семь:
-генераторы таблиц и бланков ставят каждую цифру своим ``Td``, чтобы колонка
-выровнялась по разрядам. Разборщик честно делит такой текст на фрагменты —
-каждый со своим состоянием, — потому что ``BT``, ``ET``, смена шрифта, кегля
-или межбуквенного интервала закрывают фрагмент. Поиск внутри фрагмента такого
-числа не находил вовсе.
+The number "1234567" is one thing on screen, but the content stream may hold seven:
+table and form generators place each digit with its own `Td` so the column aligns by
+digit position. The parser honestly splits such text into separate runs — each with
+its own state — because `BT`, `ET`, a change of font, size or character spacing all
+close a run. Searching inside a run would never find such a number.
 
-Поэтому поиск идёт по **визуальным строкам**: фрагменты одного потока с общей
-базовой линией и небольшим горизонтальным зазором склеиваются в то, что
-читатель видит слитно (правило зазоров то же, что и внутри фрагмента).
-Совпадение хранится кусками, и замена ложится так: весь новый текст в первый
-кусок, остальные вычищаются.
+The search therefore works over **visual lines**: runs from the same stream sharing
+a baseline with a small horizontal gap are joined into what the reader sees as
+continuous (the gap rule is the same as the one used inside a run). A match is
+stored in pieces, and the replacement lands like this: all the new text goes into
+the first piece, and the rest are cleared.
 
-Два следствия, о которых стоит знать:
+Two consequences worth knowing:
 
-- **Куски применяются только все вместе.** Если новый текст не удалось
-  поместить в первый кусок (не хватило глифов), остальные тоже остаются
-  нетронутыми. Иначе вышло бы худшее из возможного: старого текста уже нет,
-  нового ещё нет.
-- **Строка перевёрстывается по первому куску.** Собственные координаты
-  остальных кусков пропадают: текст течёт от начала первого. Если куски стояли
-  с намеренными промежутками (колонки таблицы), промежутки сомкнутся — и это
-  видно на глаз. Отдельные ячейки таблицы в одну группу не попадают: их
-  разделяет зазор больше двух с половиной кеглей.
+- **The pieces are applied all together or not at all.** If the new text could not
+  be placed into the first piece (not enough glyphs), the rest are left untouched
+  too. Otherwise you would get the worst possible outcome: the old text already
+  gone, the new text not yet there.
+- **The line reflows from the first piece.** The other pieces lose their own
+  coordinates: the text flows from the start of the first. If the pieces stood apart
+  deliberately (table columns), the gaps will close up — and that is visible to the
+  eye. Separate table cells never end up in one group: they are separated by a gap
+  of more than two and a half em.
 
-Фрагменты **разных потоков** не склеиваются никогда: внешний вид поля формы и
-текст страницы могут оказаться на одной базовой линии, но это разные объекты.
+Runs from **different streams** are never joined: the appearance of a form field and
+the page text may share a baseline, but they are different objects.
 
-### Точный режим
+### Exact mode
 
-Ключ `--exact` включает правило «на странице окажется ровно то, что задано, и
-ни буквой больше». Отключается всё, что в обычном режиме помогает результату
-выглядеть аккуратно, но меняет заданное:
+The `--exact` flag enforces the rule "the page will contain exactly what was
+specified and not one letter more". Everything that in normal mode helps the result
+look tidy but changes what was asked for is switched off:
 
-| что отключается | почему |
+| what is disabled | why |
 |---|---|
-| подгонка ширины (`Tz`, кернинг) | она сжимает или растягивает глифы, подгоняя новый текст под место старого |
-| сдвиг строки ради выключки | лишняя инструкция `[n] TJ`, которой в потоке ничто не объясняет |
-| личная библиотека доноров | брать оттуда «что подойдёт» и есть автоподбор |
-| системные шрифты | системный тёзка имеет другие контуры: подменять им донорский глиф значит менять вид документа |
+| width fitting (`Tz`, kerning) | it squeezes or stretches glyphs to fit the new text into the old space |
+| line shift for justification | an extra `[n] TJ` instruction that nothing in the stream explains |
+| the personal donor library | taking "whatever fits" from it is exactly the automatic substitution being avoided |
+| system fonts | a system namesake has different outlines: substituting it for a donor glyph changes the document's appearance |
 
-Источник глифов задаётся ключом `--donor файл.pdf` — и других не остаётся
-вовсе. Чего в доноре нет, то **не подменяется похожим**: правка отклоняется с
-перечислением недостающих символов.
+The glyph source is given with `--donor file.pdf` — and there are no others. What
+the donor does not have is **not substituted with something similar**: the edit is
+rejected, listing the missing characters.
 
 ```bash
-python -m pdfedit replace договор.pdf -o итог.pdf \
-    --old "Total 100" --new "Итого 100" --exact --donor образец.pdf --inplace
+python -m pdfedit replace contract.pdf -o out.pdf \
+    --old "Total 100" --new "Итого 100" --exact --donor sample.pdf --inplace
 ```
 
-Глифы копируются из донора **дословно** — вместе с координатами точек и
-инструкциями хинтинга, а не перерисовываются по контуру: перерисовка даёт тот
-же вид, но другие байты, и глиф перестаёт быть донорским. Составной глиф
-(буква из основы и надстрочного знака) переносится вместе со своими
-составляющими; меняются только ссылки на них — иначе и быть не может, номера
-глифов в двух разных шрифтах не совпадают.
+Glyphs are copied from the donor **verbatim** — together with their point
+coordinates and hinting instructions, rather than redrawn from the outline:
+redrawing gives the same appearance but different bytes, and the glyph stops being
+the donor's. A composite glyph (a letter made of a base and a diacritic) is
+transferred along with its components; only the references to them change — which is
+unavoidable, since glyph indices differ between two fonts.
 
-Точный текст важнее места: если он не влезает в исходный поток, правка
-дописывается отдельным слоем — со всем прочим сохранённым (`/ID`, даты,
-`/Producer`, нумерация объектов, уровень сжатия).
+Exact text matters more than exact position: if it does not fit into the original
+stream, the edit is appended as a separate layer — with everything else preserved
+(`/ID`, dates, `/Producer`, object numbering, compression level).
 
-### Манера письма: чем правка выдаёт себя, даже когда всё правильно
+### Writing style: how an edit betrays itself even when it is correct
 
-Правка бывает верной по существу и всё равно заметной. Одну и ту же инструкцию
-можно записать десятком равнозначных способов, и каждый генератор выбирает
-свой: Word пишет строки шестнадцатерично (`<0048> Tj`), reportlab — в скобках
-(`(H) Tj`), LibreOffice ставит числа с фиксированной разрядностью (`72.00`),
-fpdf — как получится (`72`). Разборщику всё равно. Но если во всём документе
-строки шестнадцатеричные, а в одном месте вдруг круглые скобки, место правки
-видно с первого взгляда на распакованный поток — без всякого сравнения с
-оригиналом.
+An edit can be substantively correct and still conspicuous. The same instruction can
+be written a dozen equivalent ways, and every generator picks its own: Word writes
+strings in hexadecimal (`<0048> Tj`), reportlab in parentheses (`(H) Tj`),
+LibreOffice writes numbers at a fixed precision (`72.00`), fpdf however it comes out
+(`72`). The parser does not care. But if strings are hexadecimal throughout the
+document and suddenly parenthesised in one spot, the site of the edit is visible at a
+glance in the decompressed stream — with no comparison to the original at all.
 
-Поэтому стиль снимается **с байтов той самой инструкции**, которую заменяют
-(`pdfedit/style.py`), и новая пишется в нём же:
+The style is therefore lifted **from the bytes of the very instruction** being
+replaced (`pdfedit/style.py`), and the new one is written in the same style:
 
-- шестнадцатеричные строки остаются шестнадцатеричными, в скобках — в скобках,
-  сохраняется даже регистр шестнадцатеричных цифр;
-- разрядность чисел не меняется: `700.00` не станет `700`, а `700` — `700.00`;
-- `Tj` не превращается в `TJ` и наоборот, если перевод ничего не теряет
-  (массив `TJ` с кернингом в `Tj` не переводится — там числа несут смысл);
-- сохраняется даже разделитель между инструкциями и наличие пробела перед
-  оператором: `(текст)Tj` и `(текст) Tj` — разные почерки.
+- hexadecimal strings stay hexadecimal, parenthesised stay parenthesised, and even
+  the case of the hex digits is preserved;
+- numeric precision is not changed: `700.00` does not become `700`, nor `700` become
+  `700.00`;
+- `Tj` does not turn into `TJ` or vice versa where the conversion loses nothing (a
+  `TJ` array with kerning is never converted to `Tj` — those numbers carry meaning);
+- even the separator between instructions and the presence of a space before the
+  operator are preserved: `(text)Tj` and `(text) Tj` are different hands.
 
-Это работает во всех трёх режимах сохранения, а не только при правке на месте:
-поток переписывается точечной заменой инструкций, а полная пересборка
-библиотекой остаётся запасным путём на случай, когда точечная замена в чём-то
-не уверена.
+This applies in all three saving modes, not just in-place editing: the stream is
+rewritten by targeted instruction substitution, and a full library reassembly remains
+the fallback path for when targeted substitution is unsure about something.
 
-### Сжатие: уровень zlib и хвосты в потоках
+### Compression: zlib level and stream tails
 
-Два бита в заголовке zlib сообщают, насколько старательно сжимали: уровень 6
-даёт `78 9c`, уровни 7–9 — `78 da`. Сравнить эти два байта у оригинала и
-результата — самый дешёвый способ увидеть, что поток пересжали чужой
-программой, и первое, на что смотрят при разборе. Поэтому поток пересжимается
-тем же уровнем, каким был сжат.
+Two bits in the zlib header report how hard the data was compressed: level 6 gives
+`78 9c`, levels 7–9 give `78 da`. Comparing those two bytes between the original and
+the result is the cheapest way to see that a stream was recompressed by different
+software, and the first thing anyone looks at. Streams are therefore recompressed at
+the level they were compressed with.
 
-Отдельная беда — **хвосты**. Правка на месте обязана уложиться в исходную
-длину, и разницу раньше добивали пробелами за концом сжатых данных. Декодер их
-не читает, но в файле они остаются: неиспользуемые байты внутри потока — сами
-по себе улика. Теперь длина набирается средствами формата: после
-`Z_SYNC_FLUSH` поток выровнен по границе байта, и к нему дописываются пустые
-stored-блоки deflate — каждый стоит пять байт и не несёт ни одного байта
-данных. Оставшиеся один-четыре байта добираются переносом хвоста данных в
-последний блок нетронутым. Распакованное содержимое при этом совпадает с
-исходным байт в байт, а хвоста нет вовсе.
+A separate problem is **tails**. An in-place edit must fit the original length, and
+the difference used to be padded with spaces past the end of the compressed data. The
+decoder does not read them, but they remain in the file: unused bytes inside a stream
+are evidence in themselves. Now the length is made up using the format's own means:
+after `Z_SYNC_FLUSH` the stream is byte-aligned, and empty deflate stored blocks are
+appended — five bytes each, carrying no data at all. The remaining one to four bytes
+are made up by moving the tail of the data into the last block untouched. The
+decompressed content is identical to the original byte for byte, and there is no tail
+whatsoever.
 
-Ровная длина требует около десятка байт запаса. Когда его нет, запас даёт более
-сильное сжатие — но оно меняет заголовок. Эти два бита декодер не читает (RFC
-1950 называет их справочными, `inflate` смотрит только на метод и размер окна),
-поэтому заголовок возвращается исходный целиком. Если и это не помогает,
-остаётся заполнитель — и `check --strict` о нём честно сообщает.
+Making the length come out exactly needs about ten bytes of slack. When there is
+none, stronger compression provides it — but that changes the header. The decoder
+does not read those two bits (RFC 1950 calls them advisory; `inflate` looks only at
+the method and window size), so the header is restored to the original in full. If
+even that does not help, padding remains — and `check --strict` reports it honestly.
 
-### Скрытые копии текста
+### Hidden copies of the text
 
-Один и тот же текст лежит в файле в нескольких местах сразу, и правка
-содержимого меняет лишь одно из них. `_sync_structure_text` приводит в
-соответствие все:
+The same text sits in several places in the file at once, and editing the content
+changes only one of them. `_sync_structure_text` brings them all into agreement:
 
-| где | ключи | чем грозит рассогласование |
+| where | keys | what a mismatch costs |
 |---|---|---|
-| структурное дерево тегированного PDF | `/ActualText`, `/Alt`, `/E` | PyMuPDF и экранные дикторы предпочитают копию содержимому страницы и показывают старый текст |
-| разметка внутри самого потока | `/Span <</ActualText …>> BDC` | копия не видна при обходе объектов — она операнд инструкции |
-| поля форм | `/V`, `/DV`, `/TU`, `/RV` | значение поля расходится с тем, что нарисовано в `/AP` |
-| внешний вид аннотаций | поток `/AP /N` | на экране остаётся прежнее значение при новом `/V` |
-| аннотации | `/Contents`, `/RC`, `/Subj` | исходная формулировка остаётся в заметке |
-| закладки | `/Title` | старый текст виден в оглавлении |
+| the structure tree of a tagged PDF | `/ActualText`, `/Alt`, `/E` | PyMuPDF and screen readers prefer the copy over the page content and show the old text |
+| markup inside the stream itself | `/Span <</ActualText …>> BDC` | the copy is invisible when walking objects — it is an instruction operand |
+| form fields | `/V`, `/DV`, `/TU`, `/RV` | the field value disagrees with what is drawn in `/AP` |
+| annotation appearance | the `/AP /N` stream | the old value stays on screen despite a new `/V` |
+| annotations | `/Contents`, `/RC`, `/Subj` | the original wording survives in the note |
+| bookmarks | `/Title` | the old text is visible in the outline |
 
-Имя поля (`/T`) намеренно не трогается: по нему форму находят программы.
+The field name (`/T`) is deliberately left alone: software locates the form by it.
 
-### Шрифты
+### Fonts
 
-Копирование глифов из донора (`fontops.copy_glyphs_from_donor`) сделано так,
-чтобы результат отличался от исходной программы ровно на добавленные глифы:
+Copying glyphs from a donor (`fontops.copy_glyphs_from_donor`) is done so that the
+result differs from the original program by exactly the added glyphs:
 
-- `recalcTimestamp=False` — иначе fontTools запишет в `head.modified` текущее
-  время, и шрифт, созданный в 2002 году, окажется «изменён» сегодня;
-- `recalcBBoxes=False` — иначе пересчитываются габаритные рамки **всех**
-  глифов, включая нетронутые; рамка считается только добавленным глифам
-  (без неё глиф не отрисовался бы вовсе);
-- физический порядок таблиц восстанавливается: `TTFont.save` раскладывает их
-  в своём каноническом порядке — на Arial это переносит `cmap` с двадцать
-  второго места на восьмое;
-- таблицы хинтинга (`fpgm`, `prep`, `cvt`) остаются побайтово теми же;
-- ширина нового глифа попадает в `hmtx` и в `/W` из одного источника
-  (`fontops.width_to_pdf`), поэтому значения не расходятся;
-- **глифов-сирот не остаётся.** Глифы добываются заранее — до того, как правка
-  применена, — потому что без них неизвестно, выполнима ли она вообще. Если
-  правка в итоге не состоялась, шрифт возвращается к снимку целиком
-  (`fontops.FontSnapshot`): глиф, на который не ссылается ни один код, ничего
-  не рисует, но прямо показывает, что шрифт правили, и даже какие буквы для
-  этого понадобились.
+- `recalcTimestamp=False` — otherwise fontTools writes the current time into
+  `head.modified`, and a font created in 2002 turns out to have been "modified"
+  today;
+- `recalcBBoxes=False` — otherwise the bounding boxes of **all** glyphs are
+  recomputed, including untouched ones; the box is computed for added glyphs only
+  (without it the glyph would not render at all);
+- the physical order of tables is restored: `TTFont.save` lays them out in its own
+  canonical order — on Arial that moves `cmap` from twenty-second place to eighth;
+- the hinting tables (`fpgm`, `prep`, `cvt`) stay byte-identical;
+- the width of a new glyph reaches `hmtx` and `/W` from a single source
+  (`fontops.width_to_pdf`), so the values cannot diverge;
+- **no orphan glyphs are left behind.** Glyphs are obtained in advance — before the
+  edit is applied — because without them there is no telling whether the edit is
+  feasible at all. If the edit ultimately does not happen, the font is rolled back to
+  a snapshot in full (`fontops.FontSnapshot`): a glyph no code refers to draws
+  nothing, but announces plainly that the font was edited, and even which letters
+  were needed for it.
 
-**Что честно сказать о пределах.** Полная неотличимость на уровне байтов
-недостижима и не обещается: qpdf перезаписывает файл целиком, поэтому порядок
-объектов, отступы и параметры сжатия неизменённых частей могут отличаться от
-оригинала. Если в шрифт добавлялись глифы, его программа заведомо изменилась.
-Речь идёт о том, что документ не несёт **следов редактирования** — маркеров
-инструмента, рассогласованных метаданных, дописанных слоёв, — а не о
-невозможности установить сам факт пересохранения при побайтовом сравнении с
-заведомо известным оригиналом.
+**What must honestly be said about the limits.** Byte-level indistinguishability is
+unattainable and is not promised: qpdf rewrites the file in full, so object order,
+indentation and the compression parameters of unchanged parts may differ from the
+original. If glyphs were added to a font, its program has certainly changed. The
+claim is that the document carries no **traces of editing** — no tool markers, no
+mismatched metadata, no appended layers — not that the fact of a re-save could not be
+established by a byte-level comparison against a known-good original.
 
 ---
 
-## Программный интерфейс
+## Programmatic interface
 
 ```python
 from pdfedit import PdfEditor, verify
 
-# простая замена
-with PdfEditor("договор.pdf") as editor:
-    report = editor.replace("Иванов", "Петров")
-    print(f"заменено: {len(report.applied)}")
-    editor.save("договор-исправленный.pdf")
+# a simple replacement
+with PdfEditor("contract.pdf") as editor:
+    report = editor.replace("Smith", "Jones")
+    print(f"replaced: {len(report.applied)}")
+    editor.save("contract-fixed.pdf")
 
-print(verify("договор.pdf", "договор-исправленный.pdf").describe())
+print(verify("contract.pdf", "contract-fixed.pdf").describe())
 ```
 
-Сохранение дописыванием и проверка результата:
+Incremental saving with verification of the result:
 
 ```python
 from pdfedit import PdfEditor, check_file, compare_files
 
-with PdfEditor("договор.pdf") as editor:
-    editor.replace("Иванов", "Петров")
-    editor.save("договор-исправленный.pdf", incremental=True)
+with PdfEditor("contract.pdf") as editor:
+    editor.replace("Smith", "Jones")
+    editor.save("contract-fixed.pdf", incremental=True)
     print(editor.last_incremental_report.describe())
 
-# файл сам по себе цел?
-structure = check_file("договор-исправленный.pdf")
+# is the file intact on its own?
+structure = check_file("contract-fixed.pdf")
 print(structure.describe())
 assert structure.valid
 
-# что изменилось по сравнению с оригиналом?
-diff = compare_files("договор.pdf", "договор-исправленный.pdf")
+# what changed compared with the original?
+diff = compare_files("contract.pdf", "contract-fixed.pdf")
 print(diff.describe())
-assert diff.original_bytes_kept        # исходные байты на месте
-assert diff.object_numbers_kept        # ссылки ведут к тем же объектам
-assert not diff.unexpected_differences  # ничего сверх самой правки
+assert diff.original_bytes_kept         # original bytes still in place
+assert diff.object_numbers_kept         # references lead to the same objects
+assert not diff.unexpected_differences  # nothing beyond the edit itself
 ```
 
-Поиск и выборочная правка:
+Searching and selective editing:
 
 ```python
-with PdfEditor("договор.pdf") as editor:
+with PdfEditor("contract.pdf") as editor:
     editor.parse()
 
     for match in editor.find("2021", pages=[0]):
-        print(f"с.{match.page_index + 1}: {match.run.text!r} в {match.run.bbox}")
+        print(f"p.{match.page_index + 1}: {match.run.text!r} at {match.run.bbox}")
 
-    # заменить только то вхождение, что стоит в шапке документа
-    первое = editor.find("2021")[0]
-    editor.apply_edits([первое.to_edit("2022")])
-    editor.save("итог.pdf")
+    # replace only the occurrence in the document header
+    first = editor.find("2021")[0]
+    editor.apply_edits([first.to_edit("2022")])
+    editor.save("out.pdf")
 ```
 
-Правка метаданных:
+Editing metadata:
 
 ```python
 from pdfedit import PdfEditor
 from pdfedit.metadata import apply_metadata
 
-with PdfEditor("вход.pdf") as editor:
+with PdfEditor("in.pdf") as editor:
     apply_metadata(editor.pdf, {
-        "/Author": "П. П. Петров",
+        "/Author": "J. Jones",
         "/CreationDate": "2019-01-01 10:00:00",
-        "/Keywords": None,          # None удаляет поле
+        "/Keywords": None,          # None removes the field
     })
-    editor.save("выход.pdf")
+    editor.save("out.pdf")
 ```
 
-Полезные объекты:
+Useful objects:
 
-| Объект | Назначение |
+| Object | Purpose |
 |---|---|
-| `PdfEditor` | загрузка, разбор, поиск, замена, сохранение |
-| `PdfEditor.runs` | список `TextRun` — фрагментов с текстом, шрифтом и `bbox` |
-| `Match` | найденное вхождение; `.to_edit(новый_текст)` даёт задание на правку |
-| `EditSpec` | задание на правку, сериализуемое в JSON |
-| `ApplyReport` | что применено, что пропущено и почему, что стало со шрифтами |
-| `verify()` | сверка двух файлов по метаданным и структуре |
+| `PdfEditor` | loading, parsing, searching, replacing, saving |
+| `PdfEditor.runs` | a list of `TextRun` — runs with text, font and `bbox` |
+| `Match` | a found occurrence; `.to_edit(new_text)` produces an edit instruction |
+| `EditSpec` | an edit instruction, serialisable to JSON |
+| `ApplyReport` | what was applied, what was skipped and why, what happened to the fonts |
+| `verify()` | compares two files by metadata and structure |
 
 ---
 
-## Тесты
+## Tests
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-204 проверки: разбор и сборка CMap, побайтовая точность перекодирования,
-совпадение геометрии с независимым разборщиком, все режимы подгонки,
-расширение шрифтов, текст в XObject, запасной шрифт, сохранность метаданных
-и `/ID`, все три режима сохранения, команды CLI.
+225 checks: CMap parsing and assembly, byte-level accuracy of re-encoding, geometry
+agreement with an independent parser, all fitting modes, font extension, text in
+XObjects, the fallback font, preservation of metadata and `/ID`, all three saving
+modes, the CLI commands.
 
-Отдельно стоит отметить проверку `test_glyphs_are_actually_drawn`: она
-подсчитывает краску на отрисованной странице. Текст, который **извлекается**,
-но не **виден**, — самая коварная ошибка при правке шрифтовых подмножеств, и
-сравнением строк она не ловится.
+One check deserves a special mention: `test_glyphs_are_actually_drawn` counts the ink
+on the rendered page. Text that can be **extracted** but is not **visible** is the
+most treacherous failure when editing font subsets, and comparing strings will never
+catch it.
 
-`tests/test_integrity.py` проверяет отсутствие следов правки на документах,
-написанных **разными почерками** (`tests/generators.py`). reportlab и fpdf2
-вызываются по-настоящему; Word и LibreOffice поставить на эту машину нельзя,
-поэтому их почерк воспроизводится вручную — по чертам, которые эти пакеты
-оставляют в файле (шестнадцатеричные строки и `/ActualText` у Word, простой
-`/TrueType` с `/Differences` и сжатие уровнем 9 у LibreOffice). Функции так и
-называются: `word_style`, `libreoffice_style`. Разнообразие здесь не
-украшение — почти каждая ошибка в сохранении стиля видна только на одном из
-почерков: то, что бережно правит файл reportlab, легко ломает файл из Word.
+`tests/test_integrity.py` verifies the absence of editing traces on documents written
+in **different hands** (`tests/generators.py`). reportlab and fpdf2 are invoked for
+real; Word and LibreOffice cannot be installed on this machine, so their hands are
+reproduced manually — from the traits those packages leave in a file (hexadecimal
+strings and `/ActualText` for Word; plain `/TrueType` with `/Differences` and
+compression level 9 for LibreOffice). The functions are named accordingly:
+`word_style`, `libreoffice_style`. The variety is not decoration — nearly every bug in
+style preservation shows up in only one of the hands: what carefully edits a reportlab
+file will happily break a file from Word.
 
-Замены в этих проверках — **цифра на цифру**. Ширина не мелочь: если новый
-текст шире или уже старого, редактор подгоняет строку горизонтальным сжатием,
-и в потоке появляются две инструкции `Tz` — правка перестаёт помещаться в
-исходную длину и уходит в дописанный слой. Цифры почти во всех шрифтах одной
-ширины, и замена цифры на цифру ничего не двигает. Это же и самый частый
-случай правки в жизни — опечатка в номере или сумме.
-
----
-
-## Ограничения
-
-- **Замена в пределах одной строки.** Текст, разорванный на несколько
-  операторов показа, ищется и заменяется целиком (см. [Разорванный
-  текст](#разорванный-текст)), но перенос на другую строку остаётся границей:
-  программа сообщит об этом и предложит заменить части по отдельности.
-- **Шрифты Type3** (глифы которых сами являются программами рисования) доступны
-  только для чтения.
-- **Расширение шрифта работает для TrueType.** Для CFF/Type1 внедряется
-  запасной шрифт.
-- **Отсканированные документы** редактировать нечего: текста в них нет.
-  Программа сообщает, что фрагментов не найдено.
-- **Защита паролем при полной пересборке воспроизводится не целиком**:
-  владельческий пароль и `/ID` восстановить невозможно (см. [Защищённые
-  документы](#защищённые-документы)). При дописывании защита сохраняется
-  полностью.
-- **Цифровая подпись после правки недействительна** — это свойство подписи, а
-  не ограничение программы (см. [Цифровые подписи](#цифровые-подписи)).
-- **Общий Form XObject.** Если один XObject используется несколькими
-  страницами, правка отразится на всех — это свойство самого документа.
-- **Составные шрифты с явной таблицей `/CIDToGIDMap`** не расширяются; для них
-  используется запасной шрифт.
-- **Правка на месте помещается не всегда.** Одинаковый по длине текст может
-  сжаться иначе: на 60 реальных документах 40 легли полностью на место, 14
-  частично ушли в дописанный слой. Бывает и принципиально неразрешимый случай —
-  когда лучшее из возможных сжатий даёт 113 байт при ёмкости 112. Тогда правка
-  честно уходит слоем, а `check --strict` показывает, чем это видно.
-- **Объекты внутри `/ObjStm` на месте не правятся** — это ограничение
-  принципиальное: в сжатом объектном потоке объекты упакованы вместе, и правка
-  одного задела бы соседей. Чаще всего туда попадают узлы структурного дерева
-  с `/ActualText`, поэтому тегированные документы уходят слоем чаще прочих.
-  Обычные объекты-словари (узлы структурного дерева, закладки, поля форм)
-  правятся на месте наравне с потоками, если их запись не стала длиннее.
-- **Ровная длина требует запаса.** Когда данные сжимаются почти в исходный
-  размер, на завершающий stored-блок не хватает места, и за ними остаётся
-  заполнитель: на тех же 60 документах — у 11 из 39. Проверка `хвост-в-потоке`
-  о нём сообщает.
-- **Пересобираются только две цепочки фильтров** — `/FlateDecode` и
-  `/ASCII85Decode` поверх него (так пишет reportlab). Поток с чужим фильтром
-  или с `/DecodeParms` на месте не правится и уходит в дописанный слой.
-- **Стиль воспроизводится для потоков содержимого.** Манера записи словарей и
-  трейлера остаётся на усмотрение qpdf при полной пересборке.
+The replacements in these checks are **digit for digit**. Width is no trifle: if the
+new text is wider or narrower than the old, the editor adjusts the line by horizontal
+scaling, two `Tz` instructions appear in the stream, the edit stops fitting the
+original length and goes into the appended layer. Digits are the same width in almost
+every font, so digit-for-digit replacement moves nothing. It is also the most common
+edit in real life — a typo in a number or an amount.
 
 ---
 
-## Устройство исходного кода
+## Limitations
 
-| Файл | Содержание |
+- **Replacement within a single line.** Text broken across several showing
+  operators is found and replaced as a whole (see [Split text](#split-text)), but a
+  line break remains a boundary: the program reports this and offers to replace the
+  parts separately.
+- **Type3 fonts** (whose glyphs are themselves drawing programs) are read-only.
+- **Font extension works for TrueType.** For CFF/Type1 a fallback font is embedded
+  instead.
+- **Scanned documents have nothing to edit:** there is no text in them. The program
+  reports that no runs were found.
+- **Password protection is not fully reproduced on a full rebuild**: the owner
+  password and `/ID` cannot be restored (see
+  [Encrypted documents](#encrypted-documents)). With incremental saving, protection
+  is preserved completely.
+- **A digital signature is invalid after an edit** — that is a property of
+  signatures, not a limitation of the program (see
+  [Digital signatures](#digital-signatures)).
+- **Shared Form XObjects.** If one XObject is used by several pages, the edit shows
+  on all of them — a property of the document itself.
+- **Composite fonts with an explicit `/CIDToGIDMap`** are not extended; a fallback
+  font is used for them.
+- **An in-place edit does not always fit.** Text of identical length may compress
+  differently: across 60 real documents, 40 fitted entirely in place and 14 partly
+  went into the appended layer. There is also the fundamentally unsolvable case —
+  when the best possible compression yields 113 bytes against a capacity of 112. The
+  edit then honestly goes into a layer, and `check --strict` shows what gives it away.
+- **Objects inside an `/ObjStm` are not edited in place** — this limitation is
+  fundamental: objects are packed together inside a compressed object stream, and
+  editing one would disturb its neighbours. Structure-tree nodes with `/ActualText`
+  most often end up there, which is why tagged documents go into a layer more often
+  than others. Ordinary dictionary objects (structure-tree nodes, bookmarks, form
+  fields) are edited in place on equal terms with streams, provided their
+  representation has not grown longer.
+- **An exact length needs slack.** When the data compresses to nearly its original
+  size, there is not enough room for the closing stored block, and a padding tail
+  remains behind it: on those same 60 documents — 11 out of 39. The `stream-tail`
+  check reports it.
+- **Only two filter chains are reassembled** — `/FlateDecode`, and `/ASCII85Decode`
+  on top of it (which is how reportlab writes). A stream with any other filter, or
+  with `/DecodeParms`, is not edited in place and goes into the appended layer.
+- **Style is reproduced for content streams.** The manner of writing dictionaries and
+  the trailer is left to qpdf on a full rebuild.
+
+---
+
+## Source layout
+
+| File | Contents |
 |---|---|
-| `pdfedit/cmap.py` | разбор и сборка CMap: `/ToUnicode` и кодировки составных шрифтов |
-| `pdfedit/encodings_tables.py` | стандартные однобайтовые кодировки простых шрифтов |
-| `pdfedit/fonts.py` | модель шрифта: кодирование, декодирование, метрики, наличие глифов, поиск системных шрифтов |
-| `pdfedit/fontops.py` | добавление глифов во внедрённые шрифты, внедрение запасных |
-| `pdfedit/content.py` | разбор потоков содержимого, отслеживание состояния, текстовые фрагменты |
-| `pdfedit/editor.py` | поиск, планирование правок, пересборка операторов показа текста |
-| `pdfedit/metadata.py` | чтение и правка `/Info`, синхронизация XMP, форматы дат |
-| `pdfedit/saving.py` | сохранение без следов правки и сверка результата |
-| `pdfedit/incremental.py` | дописывание слоя правок: новые редакции объектов, таблица `xref` или поток `/XRef`, самопроверка результата |
-| `pdfedit/inplace.py` | правка потоков поверх старых байтов без изменения длины файла |
-| `pdfedit/streampatch.py` | границы инструкций в потоке содержимого и точечная замена изменённых |
-| `pdfedit/style.py` | манера записи операндов: шестнадцатеричные строки или скобки, разрядность чисел, `Tj` против `TJ` — снимается с оригинала и воспроизводится |
-| `pdfedit/traces.py` | поиск следов правки: хвосты в потоках, уровень сжатия, глифы-сироты, расхождение ширин, скрытые копии текста |
-| `pdfedit/pdfcrypt.py` | шифрование дописанных объектов: AES и RC4, ключи объектов |
-| `pdfedit/validate.py` | проверка целостности структуры и сверка двух документов по дереву объектов |
-| `pdfedit/cli.py` | командная строка |
-| `pdfedit/gui.py` | графический редактор на Tkinter |
-| `app/build_app.py` | сборка приложения pdfedit.app для macOS |
-| `app/make_icon.py` | значок приложения (рисуется программно) |
-| `samples/make_samples.py` | генератор тестовых документов, включая `sample_layered.pdf` — самый сложный профиль: прозрачность, маски, три вида шрифтов, ссылка |
-| `tests/test_pdfedit.py` | проверки |
-| `tests/test_incremental.py` | проверки дописывания, шифрования и контрольные примеры AES |
-| `tests/test_validate.py` | проверки валидатора: испорченные документы должны опознаваться |
-| `tests/test_inplace.py` | проверки правки на месте и разборщика инструкций |
-| `tests/generators.py` | документы четырёх почерков: reportlab и fpdf2 по-настоящему, Word и LibreOffice — воспроизведением их черт |
-| `tests/test_integrity.py` | отсутствие следов правки: манера записи, уровень сжатия, хвосты, скрытые копии, шрифты |
-| `tests/test_split_and_exact.py` | разорванный текст, поля форм (`/V` вместе с `/AP`), точный режим и дословность донорских глифов |
+| `pdfedit/cmap.py` | parsing and assembling CMaps: `/ToUnicode` and composite font encodings |
+| `pdfedit/encodings_tables.py` | standard single-byte encodings for simple fonts |
+| `pdfedit/fonts.py` | the font model: encoding, decoding, metrics, glyph presence, system font lookup |
+| `pdfedit/fontops.py` | adding glyphs to embedded fonts, embedding fallbacks |
+| `pdfedit/content.py` | content stream parsing, state tracking, text runs |
+| `pdfedit/editor.py` | searching, planning edits, reassembling text-showing operators |
+| `pdfedit/metadata.py` | reading and editing `/Info`, XMP synchronisation, date formats |
+| `pdfedit/saving.py` | saving without editing traces, and verifying the result |
+| `pdfedit/incremental.py` | appending an edit layer: new object revisions, `xref` table or `/XRef` stream, self-verification |
+| `pdfedit/inplace.py` | editing streams over the old bytes without changing file length |
+| `pdfedit/streampatch.py` | instruction boundaries in a content stream and targeted substitution of changed ones |
+| `pdfedit/style.py` | the manner of writing operands: hex strings or parentheses, numeric precision, `Tj` versus `TJ` — lifted from the original and reproduced |
+| `pdfedit/traces.py` | hunting for editing traces: stream tails, compression level, orphan glyphs, width mismatches, hidden text copies |
+| `pdfedit/pdfcrypt.py` | encryption of appended objects: AES and RC4, object keys |
+| `pdfedit/validate.py` | structural integrity checks and object-tree diffing of two documents |
+| `pdfedit/cli.py` | the command line |
+| `pdfedit/gui.py` | the Tkinter graphical editor |
+| `app/build_app.py` | building the pdfedit.app bundle for macOS |
+| `app/make_icon.py` | the application icon (drawn programmatically) |
+| `samples/make_samples.py` | generator of test documents, including `sample_layered.pdf` — the hardest profile: transparency, masks, three kinds of font, a link |
+| `tests/test_pdfedit.py` | core checks |
+| `tests/test_incremental.py` | incremental saving, encryption, and the AES test vectors |
+| `tests/test_validate.py` | the validator: corrupted documents must be recognised as such |
+| `tests/test_inplace.py` | in-place editing and the instruction parser |
+| `tests/generators.py` | documents in four hands: reportlab and fpdf2 for real, Word and LibreOffice by reproducing their traits |
+| `tests/test_integrity.py` | absence of editing traces: writing style, compression level, tails, hidden copies, fonts |
+| `tests/test_split_and_exact.py` | split text, form fields (`/V` together with `/AP`), exact mode, and the verbatim copying of donor glyphs |
 
 ---
 
-## Назначение
+## Intended use
 
-Программа предназначена исключительно для законного использования: исправления
-опечаток в официальных документах без потери их оригинальных свойств, работы с
-архивами, где важна неизменность метаданных, и тестирования систем обработки
-PDF. Ответственность за законность правки конкретного документа лежит на том,
-кто её выполняет.
+This program is intended solely for lawful use: correcting typos in official
+documents without losing their original properties, working with archives where
+metadata must remain unchanged, and testing PDF-processing systems. Responsibility
+for the lawfulness of editing any particular document rests with the person
+performing the edit.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
