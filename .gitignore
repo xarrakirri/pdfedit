@@ -1,0 +1,21 @@
+# venv
+.venv/
+.venv313/
+venv/
+
+# build
+dist/
+build/
+*.egg-info/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# macos
+.DS_Store
+
+# локальные пробы
+samples/out/
+*.local.pdf
